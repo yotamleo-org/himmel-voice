@@ -4,6 +4,7 @@ Description=Re-apply the Wyoming port rule every minute (a firewall flush wipes 
 [Timer]
 OnBootSec=1min
 OnUnitActiveSec=1min
+AccuracySec=1s
 Unit=wyoming-docker-user-refresh.service
 
 [Install]
