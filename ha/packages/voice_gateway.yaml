@@ -71,6 +71,7 @@ script:
       Research a topic in the background with the chosen assistant, save the answer to the
       luna inbox and announce when it is ready. Returns at once; tell the user you are on it.
     mode: parallel
+    max: 3
     fields:
       topic:
         description: What to research

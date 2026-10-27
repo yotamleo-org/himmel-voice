@@ -140,6 +140,15 @@ class NoteTests(Base):
             self.assertEqual(self.call("POST", "/note", NOTE)[0], 500)
         self.assertEqual(self.files(self.inbox), [])
 
+    def test_a_name_outside_the_note_shape_is_never_opened(self):
+        self.start()
+        with mock.patch.object(gateway, "slugify", return_value="x/../../outside/pwn"):
+            with self.assertRaises(ValueError):
+                gateway.write_note(self.server.RequestHandlerClass.cfg["vault_fd"], "t", "b", "codex")
+            self.assertEqual(self.call("POST", "/note", NOTE)[0], 500)
+        self.assertEqual(self.files(self.inbox), [])
+        self.assertEqual(self.files(self.outside), [])
+
     def test_symlink_at_target_name_is_not_followed(self):
         victim = os.path.join(self.outside, "victim.md")
         open(victim, "w").close()

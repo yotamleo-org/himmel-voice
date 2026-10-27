@@ -26,6 +26,7 @@ On the station, from the repo root, with `HIMMEL_ROOT` set to a himmel checkout 
     mkdir -p <vault>/00-Inbox/voice
     sudo install -m 755 gateway/input-rule.sh /usr/local/sbin/voice-gateway-input-rule
     sudo install -m 644 gateway/voice-gateway-input.service /etc/systemd/system/
+    sudo install -d -m 755 /etc/himmel-voice
     test -f /etc/himmel-voice/docker-user.env || echo 'HA_HOST=192.0.2.5' | sudo tee /etc/himmel-voice/docker-user.env    # the Home Assistant host
     sudo systemctl daemon-reload
     sudo systemctl enable --now voice-gateway-input.service
@@ -39,7 +40,7 @@ The keyring unlocks at login, so the unit retries every 30 s until then. Smoke t
 
     ~/.local/bin/himmel-secrets exec --keys VOICE_GATEWAY_TOKEN -- sh -c 'printf "Authorization: Bearer %s\n" "$VOICE_GATEWAY_TOKEN" | curl -sS http://192.0.2.10:8740/search -H @- -H "Content-Type: application/json" -d "{\"q\":\"test\"}"'
 
-To change `HA_HOST`, edit the file and run `sudo systemctl reload voice-gateway-input.service`, then change it in `gateway.env` and run `systemctl --user restart voice-gateway.service`.
+The port and `HA_HOST` live in two files: the fence reads `/etc/himmel-voice/docker-user.env` (`VOICE_GATEWAY_PORT` defaults to 8740 there) and the gateway reads `gateway.env`. Change both together. Edit the first and run `sudo systemctl reload voice-gateway-input.service`, then edit `gateway.env` and run `systemctl --user restart voice-gateway.service`.
 
 In Home Assistant:
 

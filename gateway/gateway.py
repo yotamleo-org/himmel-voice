@@ -36,6 +36,7 @@ MAX_READ = 256 * 1024
 INBOX = os.path.join("00-Inbox", "voice")
 BRAIN = re.compile(r"[a-z][a-z0-9-]{0,23}")
 PATHLIKE = re.compile(r"^[/\\]|(^|[/\\])\.\.([/\\]|$)|\x00")
+NOTE_NAME = re.compile(r"\d{4}-\d{2}-\d{2}-[a-z][a-z0-9-]{0,23}-[a-z0-9-]{1,60}(-\d{1,2})?\.md")
 RESULTS = 5
 SNIPPET = 600
 
@@ -122,6 +123,8 @@ def write_note(vault_fd, title, body, brain):
     try:
         for n in range(1, 100):
             name = f"{stem}.md" if n == 1 else f"{stem}-{n}.md"
+            if not NOTE_NAME.fullmatch(name):  # a bare file name, never a path
+                raise ValueError(f"not a note name: {name!r}")
             try:
                 fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
                              0o644, dir_fd=dfd)
@@ -282,7 +285,7 @@ class Handler(BaseHTTPRequestHandler):
             except UnicodeEncodeError:
                 self.reply(400, {"error": "title and body must be valid text"})
                 return
-            except OSError:
+            except (OSError, ValueError):
                 self.reply(500, {"error": "the note could not be written"})
                 return
             if path is None:
