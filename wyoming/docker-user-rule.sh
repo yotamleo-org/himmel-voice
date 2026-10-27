@@ -14,15 +14,18 @@ if [[ ! $ha_host =~ ^($octet\.){3}$octet$ ]]; then
     exit 2
 fi
 
-# Docker keeps a DOCKER-USER chain that already exists, so owning it here puts the rules
-# in place before any container can publish a port.
+# Owning the chain and its FORWARD jump puts the rules in place before any container can
+# publish a port. Some docker versions skip their own jump when the chain already exists
+# (moby issue 46147), so the jump is made here too; a second one is harmless.
 iptables -n -L DOCKER-USER >/dev/null 2>&1 || iptables -N DOCKER-USER
+iptables -C FORWARD -j DOCKER-USER 2>/dev/null || iptables -I FORWARD 1 -j DOCKER-USER
 
 tag=wyoming-docker-user
 for port in 10200 10300; do
-    # Docker has already DNATed the packet, so match the port the client dialled. --ctdir
+    # Docker has already DNATed the packet, so match the port the client dialled. --ctstate
+    # DNAT leaves a container's own outbound connections to these ports alone, and --ctdir
     # ORIGINAL keeps the container's replies (source not HA_HOST) out of the match.
-    rule=(DOCKER-USER -p tcp -m conntrack --ctorigdstport "$port" --ctdir ORIGINAL
+    rule=(DOCKER-USER -p tcp -m conntrack --ctstate DNAT --ctorigdstport "$port" --ctdir ORIGINAL
         ! -s "$ha_host" -m comment --comment "$tag" -j DROP)
     iptables -C "${rule[@]}" 2>/dev/null || iptables -I "${rule[@]}"
 done
