@@ -1,0 +1,7 @@
+# The one pin site for the Codex proxy images. Digest = the multi-arch index digest (checked 2026-10-27).
+# BerriAI/litellm v1.106.4, released 2026-10-25. The image's revision label is the v1.106.4 tag
+# commit, docker.io/litellm/litellm-non_root carries the same digest, and it is cosign-signed:
+#   cosign verify --key https://raw.githubusercontent.com/BerriAI/litellm/e82a3c646908ba0a6ee0beddc4310d7a6cac4065/cosign.pub <image>
+LITELLM_IMAGE=ghcr.io/berriai/litellm-non_root@sha256:ee5cb38e33c8be6d6774f7db922396b6b04d1cd962e77521b6c892b8f1c70fd8
+# Canonical's ubuntu/squid 7.2-26.04_edge, built 2026-10-23 (not cosign-signed).
+SQUID_IMAGE=docker.io/ubuntu/squid@sha256:d11db6479501aa4618b3253f95a88b2547229e2d081726b6fb20dc75a98cc61b

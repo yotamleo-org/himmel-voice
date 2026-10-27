@@ -1,0 +1,15 @@
+[Unit]
+Description=Fence the Codex proxy to the Home Assistant host and the OpenAI hosts (DOCKER-USER)
+After=network-pre.target nftables.service iptables.service firewalld.service
+Before=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=/etc/himmel-voice/docker-user.env
+ExecStart=/usr/bin/flock /run/codex-docker-user.lock /usr/local/sbin/codex-docker-user-rule
+# docker.service requires this unit, so a restart here would stop docker: apply a new HA_HOST with reload.
+ExecReload=/usr/bin/flock /run/codex-docker-user.lock /usr/local/sbin/codex-docker-user-rule
+
+[Install]
+RequiredBy=docker.service

@@ -1,0 +1,7 @@
+[Unit]
+Description=Re-apply the Codex proxy fence after a firewall flush (DOCKER-USER)
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/himmel-voice/docker-user.env
+ExecStart=/usr/bin/flock /run/codex-docker-user.lock /usr/local/sbin/codex-docker-user-rule
