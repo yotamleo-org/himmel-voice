@@ -6,30 +6,23 @@ Columns: 8
   8   8  16	outline
   8  12  24	shadow
 248 252 248	white
-248 200  72	amber
-216 144  40	amber shade
-120 200 248	sound
- 56 128 208	sound shade
+200 204 208	case
+136 140 152	grey
+ 64  68  80	grey dark
+  0   0   0	black
+240 160 128	coral light
+216 120  88	coral
+176  88  64	coral shade
+120  52  40	coral deep
+240 236 224	cream
+ 40  24  24	ink
+240 136 136	cheek
+184  56  72	mouth
+128 140 248	accent
+184 192 248	accent light
+ 72  76 168	accent dark
 232  56  56	error
 136  24  40	error dark
-248 172 128	clay light
-216 120  88	clay
-168  80  56	clay shade
-112  48  40	clay deep
-248 232 200	cream
-224 192 152	cream shade
-240 136 152	cheek
-184  56  80	mouth
-224 228 224	case light
-184 188 192	case
-128 132 144	case shade
- 24  48  40	screen
- 16  28  24	screen dark
- 96 236 144	phosphor
- 40 136  88	phosphor dim
-128 132 152	slate light
- 80  84 104	slate
- 48  52  72	slate shade
- 32  24  56	visor
-176 132 248	visor glow
-232 216 248	visor hot
+248 200  72	amber
+120 200 248	sound
+ 56 128 208	sound shade

@@ -11,7 +11,7 @@ answers. Each mascot has five states: idle, listen, think, speak and error.
   the id `<agent>_<state>`, sets `fps_<agent>_<state>` for each, and sets `mascot_x` and
   `mascot_y` (112, 66), which centre the 96 px clip in the 128 px box the screen keeps
   for the mascot at 96, 50. The firmware takes each clip's frame count from the file.
-- `palette.gpl`: the shared GIMP palette, 31 colours.
+- `palette.gpl`: the shared GIMP palette, 24 colours.
 - `preview_<agent>.gif`: every state of one mascot at 3x, about two seconds each, with
   its name underneath. For review only; the firmware does not load these.
 - `concept.png`: the first idle frame of each mascot at 4x.
@@ -42,34 +42,35 @@ answers. Each mascot has five states: idle, listen, think, speak and error.
 
 ## The mascots
 
-All three are original characters drawn for this repo. No vendor logo, mark or
-trademark is copied or traced, and no third-party asset is reused, so there is no
-licence to cite.
+These are fan-art derivatives of the vendors' marks, made for a personal device. Each
+mark is redrawn as a pixel character with a face and its own motion; no logo file is
+copied or traced, and no third-party asset is reused. The Claude, Anthropic, OpenAI,
+Codex, Grok and xAI names and marks are trademarks of their owners, and this repo is
+not affiliated with or endorsed by them.
 
-- **Claude**: a round terracotta clay creature with a cream face, rosy cheeks, nub
-  arms and feet, and one ink-curl tuft, like a pen stroke or a question curl. A warm,
-  gentle, bookish companion.
-  - Idle: breathes, rising and stretching; the tuft sways; it blinks.
-  - Listen: the tuft stands up, eyes go wide, arms lift, sound rings ripple out.
-  - Think: eyes look up, the tuft tip glows, an amber spark orbits the head and passes
-    behind it.
-  - Speak: the mouth goes closed, half, open, half, with a bounce and a gesturing arm.
-  - Error: squeezed eyes, a drooping tuft, a sweat drop, a red "!" and a shake.
-- **Codex**: a beige CRT terminal on two little legs, with a cable tail ending in an
-  amber plug. Its face is green phosphor on a scanlined screen. Diligent and precise.
-  - Idle: bobs on its legs, the cursor blinks, the tail wags, it blinks.
-  - Listen: wide eyes, sound rings, an input level meter on the bezel.
-  - Think: its eyes glance down at code lines scrolling up the screen.
-  - Speak: waveform bars are the mouth.
-  - Error: the screen turns red with X eyes, a glitch shake and a red "!".
-- **Grokbot**: a slate dome robot hovering on a violet jet, with one wide visor, a bent
-  off-centre antenna and a crooked grin, one eye at half-lid. Wry and cheeky.
-  - Idle: hovers and breathes, the jet flickers, the antenna light pulses, it blinks.
-  - Listen: the ear bolts glow blue, eyes go round, sound rings ripple out.
-  - Think: a bright scanner sweeps the visor back and forth.
-  - Speak: a lit grille mouth.
-  - Error: red static fills the visor behind white X eyes, a frown, a red "!" and a
-    shake.
+- **Claude**: the coral starburst, twelve rays of uneven length on Anthropic's warm
+  coral and cream, with an ink face and rosy cheeks on its core.
+  - Idle: the rays breathe in a slow wave; it blinks.
+  - Listen: the rays stretch out with a ripple running round them, wide eyes, an "o"
+    mouth.
+  - Think: the burst turns and its uneven outline morphs as it goes, eyes up, amber
+    thought dots.
+  - Speak: the rays pulse with the mouth: closed, half, open, half.
+  - Error: the rays shrink and shake, it flashes red, X eyes and a red "!".
+- **Codex**: the six-loop knot, white and monochrome, with a black face in its centre
+  and eyes and mouth in a blue-violet accent.
+  - Idle: the knot sways gently; it blinks.
+  - Listen: the knot swells, sound arcs ripple out.
+  - Think: the knot spins a sixth of a turn per loop, eyes up, amber thought dots.
+  - Speak: the knot pulses with the mouth.
+  - Error: the knot greys out and flashes red, X eyes, a shake and a red "!".
+- **Grokbot**: the slashed circle, a white ring on a black face with the diagonal slash
+  crossing the ring's gap.
+  - Idle: a glint runs along the slash; it blinks.
+  - Listen: the ring swells, sound arcs ripple out.
+  - Think: a notch orbits the ring, eyes up, amber thought dots.
+  - Speak: the slash bobs with the mouth.
+  - Error: the slash drops, the ring flashes red, X eyes and a red "!".
 
 ## The check
 
