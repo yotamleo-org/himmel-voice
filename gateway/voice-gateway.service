@@ -1,0 +1,14 @@
+[Unit]
+Description=voice-gateway: the voice brains save notes to the luna inbox (HIMMEL-7734)
+After=network-online.target
+
+[Service]
+EnvironmentFile=%h/.config/himmel-voice/gateway.env
+# The token comes from the keyring; a locked keyring before login fails the start, so retry.
+ExecStart=%h/.local/bin/himmel-secrets exec --keys VOICE_GATEWAY_TOKEN -- /usr/bin/python3 -I %h/.local/lib/himmel-voice/gateway.py
+Restart=on-failure
+RestartSec=30
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

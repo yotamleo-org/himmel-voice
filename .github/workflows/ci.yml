@@ -53,3 +53,6 @@ jobs:
 
       - name: assist tests
         run: python3 -I ha/test_assist.py
+
+      - name: gateway tests
+        run: python3 -I gateway/test_gateway.py
