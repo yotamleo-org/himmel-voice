@@ -120,6 +120,8 @@ voice_assistant:
   # Wake detection and speaker playback share one I2S bus: restart detection
   # only once the reply has finished playing. A start request is also dropped
   # while the wake word is still stopping from the detection, so wait for both.
+  # Every restart also requires the API client: a disconnect during the wait
+  # stops detection, and it must stay stopped until the client returns.
   on_end:
     - wait_until:
         condition:
@@ -128,7 +130,11 @@ voice_assistant:
                 micro_wake_word.is_running:
             - not:
                 voice_assistant.is_running:
-    - micro_wake_word.start:
+    - if:
+        condition:
+          api.connected:
+        then:
+          - micro_wake_word.start:
   on_error:
     - wait_until:
         condition:
@@ -137,7 +143,11 @@ voice_assistant:
                 micro_wake_word.is_running:
             - not:
                 voice_assistant.is_running:
-    - micro_wake_word.start:
+    - if:
+        condition:
+          api.connected:
+        then:
+          - micro_wake_word.start:
   # The wake word stops after a detection; a wake that fires with no Home
   # Assistant connection ends silently, so restart on reconnect. A start
   # request is dropped while the stop from the disconnect is still in progress,
