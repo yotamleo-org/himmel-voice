@@ -12,9 +12,9 @@ from faster_whisper import WhisperModel
 
 
 def main(argv):
-    model_name, device, compute, *clips = argv
-    if not clips:
+    if len(argv) < 4:
         sys.exit(__doc__)
+    model_name, device, compute, *clips = argv
     t0 = time.perf_counter()
     model = WhisperModel(model_name, device=device, compute_type=compute)
     print(f"{model_name} {device} {compute} load={time.perf_counter() - t0:.2f}s")
