@@ -324,7 +324,8 @@ def rest(ws, method, path, body=None, missing_ok=False):
         with urllib.request.urlopen(req, timeout=30) as resp:
             return resp.status
     except urllib.error.HTTPError as err:
-        if missing_ok and err.code == 404:
+        # HA answers a DELETE of an absent automation with 400 "Resource not found"; other 400s stay errors
+        if missing_ok and (err.code == 404 or (err.code == 400 and b"Resource not found" in err.read())):
             return 404
         raise RuntimeError(f"{method} {path}: HTTP {err.code}") from None
 

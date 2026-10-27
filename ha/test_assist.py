@@ -63,6 +63,7 @@ class StubHA:
         self.services = []
         self.entities = []  # entity ids get_states reports besides the helpers
         self.fail_services = False
+        self.absent_status = "404 Not Found"  # HA answers a DELETE of an absent automation with 400 "Resource not found"
         self.automations = {}
         self.calls = []
         self.server = socket.socket()
@@ -121,8 +122,8 @@ class StubHA:
         elif method == "POST":
             self.automations[auto_id] = json.loads(body)
         elif self.automations.pop(auto_id, None) is None:
-            status = "404 Not Found"
-        reply = b'{"result": "ok"}'
+            status = self.absent_status
+        reply = b'{"message": "Resource not found"}' if status != "200 OK" else b'{"result": "ok"}'
         conn.sendall(f"HTTP/1.1 {status}\r\nContent-Type: application/json\r\nConnection: close\r\n"
                      f"Content-Length: {len(reply)}\r\n\r\n".encode() + reply)
         conn.close()
@@ -370,6 +371,14 @@ class CapTest(unittest.TestCase):
         self.assertEqual(len(self.stub.input_numbers), 1)
         self.assertEqual(run_assist(self.stub, *self.SETUP).returncode, 0)
         self.assertEqual(len(self.stub.services), 1)  # now it is set, an edit in HA survives
+
+    def test_remove_is_repeatable_when_ha_answers_400_resource_not_found(self):
+        self.stub.absent_status = "400 Bad Request"
+        self.assertEqual(run_assist(self.stub, *self.SETUP).returncode, 0)
+        self.assertEqual(run_assist(self.stub, "cap", "remove").returncode, 0)
+        again = run_assist(self.stub, "cap", "remove")
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertIn("absent automation himmel_cap_count", again.stdout)
 
     def test_remove_deletes_everything_and_is_repeatable(self):
         self.assertEqual(run_assist(self.stub, *self.SETUP).returncode, 0)
