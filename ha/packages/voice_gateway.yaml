@@ -3,9 +3,12 @@
 # in secrets.yaml:
 #   voice_gateway_note_url: http://<station LAN address>:8740/note
 #   voice_gateway_search_url: http://<station LAN address>:8740/search
+#   voice_gateway_chief_url: http://<station LAN address>:8740/chief
 #   voice_gateway_auth: Bearer <VOICE_GATEWAY_TOKEN>
+#   voice_office_satellite: assist_satellite.<the office BOX-3>
 # Then replace the placeholder entity ids in research_async with the real agents and satellite,
-# and expose save_note, research and search_luna to Assist.
+# and expose save_note, research and search_luna to Assist. ask_chief (HIMMEL-7735) is exposed
+# only to the agent that serves the office satellite.
 
 rest_command:
   voice_gateway_note:
@@ -23,6 +26,16 @@ rest_command:
       authorization: !secret voice_gateway_auth
     content_type: application/json
     payload: '{{ {"q": query} | to_json }}'
+    timeout: 10
+  voice_gateway_chief:
+    url: !secret voice_gateway_chief_url
+    method: post
+    headers:
+      authorization: !secret voice_gateway_auth
+    content_type: application/json
+    payload: >-
+      {{ ({"satellite": satellite, "text": message, "chief": chief} if chief
+           else {"satellite": satellite, "text": message}) | to_json }}
     timeout: 10
 
 script:
@@ -145,6 +158,63 @@ script:
           message: >-
             {{ 'Research on ' ~ topic ~ ' is ready.' if note.saved
                else 'Research on ' ~ topic ~ ' could not be saved.' }}
+
+  ask_chief:
+    alias: Ask the chief
+    description: >-
+      Pass a spoken message to the himmel chief, for example to ask what is blocked or to ask
+      it to pause. Only the office satellite may use it: pass your own satellite id. The chief
+      treats the line as an unverified voice request: status and read-only asks are answered,
+      anything that widens work (a dispatch, a merge, a push) only produces a confirm on the
+      operator's phone. ok is false when the message was not delivered, for example when no
+      chief is listening or the satellite is not the office one; say so rather than claiming
+      it was sent.
+    mode: queued
+    max: 3
+    fields:
+      message:
+        description: What the user said to the chief, in their words
+        required: true
+        selector:
+          text:
+      satellite:
+        description: The entity id of the satellite the user is speaking to
+        required: true
+        selector:
+          text:
+      chief:
+        description: >-
+          The chief's session name, only when the user names one. Leave it out otherwise: with
+          several chiefs listening the gateway refuses an unnamed message.
+        required: false
+        selector:
+          text:
+    variables:
+      # secrets.yaml: voice_office_satellite: assist_satellite.<the office BOX-3>. A missing
+      # secret stops Home Assistant loading this file, so the script cannot run unrestricted.
+      office_satellite: !secret voice_office_satellite
+    sequence:
+      - if:
+          - condition: template
+            value_template: "{{ satellite != office_satellite }}"
+        then:
+          - variables:
+              refused:
+                ok: false
+          - stop: Refused
+            response_variable: refused
+      - action: rest_command.voice_gateway_chief
+        data:
+          satellite: "{{ satellite }}"
+          message: "{{ message }}"
+          chief: "{{ chief | default('') }}"
+        response_variable: sent
+        continue_on_error: true
+      - variables:
+          result:
+            ok: "{{ sent is defined and sent.status == 200 }}"
+      - stop: Done
+        response_variable: result
 
   search_luna:
     alias: Search luna
