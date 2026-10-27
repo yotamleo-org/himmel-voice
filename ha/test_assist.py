@@ -305,7 +305,7 @@ class AliasesTest(unittest.TestCase):
 class ImportTest(unittest.TestCase):
     def test_importing_assist_does_not_run_main(self):
         code = f"import sys; sys.path.insert(0, {HERE!r}); import assist; print(callable(assist.main))"
-        r = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True, timeout=30)
+        r = subprocess.run([sys.executable, "-B", "-I", "-c", code], capture_output=True, text=True, timeout=30)
         self.assertEqual((r.returncode, r.stdout.strip()), (0, "True"), r.stderr)
 
 
