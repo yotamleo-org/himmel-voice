@@ -379,6 +379,53 @@ class ChiefTests(Base):
         self.assertEqual(self.ask()[0], 409)
         self.assertEqual(os.path.getsize(victim), 0)
 
+    def armed_by_listing(self):
+        """Report CHIEF armed whatever is on disk, so the open itself is what refuses."""
+        return mock.patch.object(gateway, "armed_chiefs", return_value={CHIEF: False})
+
+    def test_the_open_refuses_a_symlinked_or_dangling_inbox_the_listing_called_armed(self):
+        victim = os.path.join(self.outside, "victim.md")
+        missing = os.path.join(self.outside, "missing.md")
+        open(victim, "w").close()
+        self.arm()
+        inbox = os.path.join(self.consoles, f"{CHIEF}.md")
+        for target in (victim, missing):
+            os.unlink(inbox) if os.path.lexists(inbox) else None
+            os.symlink(target, inbox)
+            with self.armed_by_listing():
+                self.assertEqual(self.ask()[0], 409, target)
+        self.assertEqual(os.path.getsize(victim), 0)
+        self.assertEqual(self.files(self.outside), ["victim.md"])
+
+    def test_the_open_never_creates_an_inbox_the_listing_called_armed(self):
+        self.arm()
+        os.unlink(os.path.join(self.consoles, f"{CHIEF}.md"))
+        with self.armed_by_listing():
+            self.assertEqual(self.ask()[0], 409)
+        self.assertEqual(self.files(self.consoles), [f"{CHIEF}.md.wait"])
+
+    def test_the_open_refuses_a_fifo_inbox_even_when_it_opens(self):
+        self.arm()
+        inbox = os.path.join(self.consoles, f"{CHIEF}.md")
+        os.unlink(inbox)
+        os.mkfifo(inbox)
+        reader = os.open(inbox, os.O_RDONLY | os.O_NONBLOCK)  # a reader, so the write open succeeds
+        self.addCleanup(os.close, reader)
+        with self.armed_by_listing():
+            self.assertEqual(self.ask()[0], 409)
+        self.assertEqual(os.read(reader, 4096), b"")
+
+    def test_a_consoles_dir_that_is_a_symlink_is_not_followed(self):
+        real = os.path.join(self.outside, "consoles")
+        os.rename(self.consoles, real)
+        os.symlink(real, self.consoles)
+        inbox = os.path.join(real, f"{CHIEF}.md")
+        open(inbox, "a").close()
+        with open(inbox + ".wait", "w") as f:
+            f.write(f"hb={int(time.time())} pid=1 key=k tick=ok state=waiting\n")
+        self.assertEqual(self.ask()[0], 409)
+        self.assertEqual(self.lines(inbox), [])
+
     def test_a_failed_heartbeat_scan_is_500_and_leaks_no_descriptor(self):
         self.arm()
         self.start(VOICE_GATEWAY_BRIDGE_ROOT=self.bridge)
