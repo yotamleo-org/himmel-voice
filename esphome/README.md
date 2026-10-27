@@ -32,7 +32,7 @@ Grokbot and runs the second slot's pipeline. The `hey_grok` model is from
 
 ## Secrets
 
-```
+```bash
 cp secrets.example.yaml secrets.yaml   # then fill in your own values
 ```
 
@@ -44,7 +44,7 @@ Use a container or a VM; do not install the ESPHome toolchain on your workstatio
 The config compiles with ESPHome 2026.10.0 (`pip install esphome==2026.10.0` in a
 venv); the first compile downloads the ESP-IDF toolchain and the `hey_jarvis` model.
 
-```
+```bash
 esphome compile box3-jarvis.yaml                         # the committed cutoff
 esphome -s wake_cutoff 0.50 compile box3-jarvis.yaml     # a candidate cutoff
 ```
@@ -54,7 +54,7 @@ esphome -s wake_cutoff 0.50 compile box3-jarvis.yaml     # a candidate cutoff
 First flash is over USB with the BOX-3 in download mode (hold BOOT, tap RESET).
 Later flashes go over the air.
 
-```
+```bash
 esphome -s wake_cutoff 0.50 run box3-jarvis.yaml --device /dev/ttyACM0   # first flash, USB
 esphome -s wake_cutoff 0.50 run box3-jarvis.yaml --device box3-jarvis.local   # later, OTA
 ```
@@ -77,7 +77,7 @@ whose colours are exact in RGB565, and writes `assets/<mascot>.gif` (8 frames:
 idle, listen, think, speak, two each), `assets/palette.gpl` and the preview sheet
 `assets/mascots.png`. After a change, regenerate them (needs Pillow):
 
-```
+```bash
 python3 -I assets/make_mascots.py
 ```
 
@@ -97,7 +97,7 @@ with Ctrl-C when the phase ends.
    volume. After each try wait for the reply to finish before the next one:
    wake detection restarts only after the device stops speaking. Say nothing else.
 
-   ```
+   ```bash
    esphome logs box3-jarvis.yaml --device box3-jarvis.local | tee true-wakes.log
    grep -c 'wake word detected: Hey Jarvis' true-wakes.log
    ```
@@ -105,7 +105,7 @@ with Ctrl-C when the phase ends.
 2. **False wakes.** Leave the device alone for 2 hours with a TV or room noise
    playing at normal volume, with nobody saying "Hey Jarvis".
 
-   ```
+   ```bash
    esphome logs box3-jarvis.yaml --device box3-jarvis.local | tee false-wakes.log
    grep -c 'wake word detected: Hey Jarvis' false-wakes.log
    ```
