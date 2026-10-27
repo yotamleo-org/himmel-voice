@@ -1,5 +1,6 @@
 [Unit]
 Description=Limit the Wyoming ports to the Home Assistant host (DOCKER-USER)
+After=network-pre.target nftables.service iptables.service firewalld.service
 Before=docker.service
 
 [Service]

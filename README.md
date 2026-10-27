@@ -22,7 +22,7 @@ The ports bind to 127.0.0.1 unless `BIND_ADDR` is set; `.env` is untracked. The 
 
 `python3 -I roundtrip.py [host] ["sentence"] [runs] [stt_port]` speaks a sentence with Piper, transcribes it with Whisper and prints the timings.
 
-Docker's published ports bypass ufw, and the kernel forgets a hand-added `DOCKER-USER` rule on reboot. `docker-user-rule.sh` drops 10200 and 10300 from every address but the Home Assistant host. `wyoming-docker-user.service` applies it before `docker.service` starts, and docker requires it, so docker does not start if the rule cannot be applied. The host address lives in an untracked file outside the repo:
+Docker's published ports bypass ufw, and the kernel forgets a hand-added `DOCKER-USER` rule on reboot. `docker-user-rule.sh` drops 10200 and 10300 from every address but the Home Assistant host, whether it dials the published port or routes straight to the container; traffic from the containers' own docker bridges is left alone. The rules live in a `WYOMING-USER` chain that `DOCKER-USER` jumps to. `wyoming-docker-user.service` applies it before `docker.service` starts, and docker requires it, so docker does not start if the rule cannot be applied. The host address lives in an untracked file outside the repo:
 
     sudo install -m 755 docker-user-rule.sh /usr/local/sbin/wyoming-docker-user-rule
     sudo install -m 644 wyoming-docker-user.service /etc/systemd/system/
@@ -30,7 +30,7 @@ Docker's published ports bypass ufw, and the kernel forgets a hand-added `DOCKER
     echo 'HA_HOST=192.0.2.5' | sudo tee /etc/himmel-voice/docker-user.env    # the Home Assistant host's address
     sudo systemctl daemon-reload
     sudo systemctl enable --now wyoming-docker-user.service
-    sudo iptables -S DOCKER-USER    # two DROP rules, one per port
+    sudo iptables -S WYOMING-USER    # two RETURN rules for the docker bridges, then a DROP per port
     sudo docker compose --env-file images.lock --env-file .env up -d
 
 To change `HA_HOST`, edit the file and run `sudo systemctl reload wyoming-docker-user.service`; the old address's rules are replaced. Do not `restart` the unit: docker requires it and would stop. A `DOCKER-USER` rule added by hand earlier is not touched; delete it once this one is in.
