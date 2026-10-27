@@ -9,6 +9,10 @@ Once per clone, with `HIMMEL_ROOT` pointing at a himmel checkout (the leak-class
 
 They refuse a secret (gitleaks), a LAN address, MAC, home path or station hostname (leak-classes), a commit on `main`, and a commit subject that is not conventional with a `HIMMEL-<n>` ticket.
 
+## Hardware
+
+[HARDWARE.md](HARDWARE.md) lists the hardware a build needs (the BOX-3, the station, the Home Assistant host, the network) and what it costs to run on the station.
+
 ## wyoming/
 
 Speech-to-text (faster-whisper, `small-int8`, English) and text-to-speech (Piper) for Home Assistant's Wyoming integration. Images are pinned by digest in `images.lock`, the one pin site; containers run non-root with a read-only rootfs.
