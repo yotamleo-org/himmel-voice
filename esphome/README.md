@@ -2,8 +2,10 @@
 
 `box3-jarvis.yaml` is the ESPHome config for the ESP32-S3-BOX-3 voice satellite
 (HIMMEL-7777, tracker HIMMEL-7719). The wake word runs on the device, so the
-cutoff is a firmware setting: the stock `hey_jarvis` cutoff (0.97) never fires on
-this hardware. The cutoff is the `wake_cutoff` substitution at the top of the file.
+cutoff is a firmware setting: the stock cutoff (0.97) of `hey_jarvis` and of
+`okay_nabu` never fires on this hardware, where a true wake averages near 0.6.
+The cutoffs are the `wake_cutoff` (Hey Jarvis) and `nabu_cutoff` (Okay Nabu)
+substitutions at the top of the file.
 
 The screen (HIMMEL-7815) shows the agent that answers and its pixel-art mascot,
 the voice state (Ready, Listening, Thinking, Speaking, Error, Muted, Offline),
@@ -52,8 +54,9 @@ The config compiles with ESPHome 2026.10.0 (`pip install esphome==2026.10.0` in 
 venv); the first compile downloads the ESP-IDF toolchain and the `hey_jarvis` model.
 
 ```bash
-esphome compile box3-jarvis.yaml                         # the committed cutoff
-esphome -s wake_cutoff 0.50 compile box3-jarvis.yaml     # a candidate cutoff
+esphome compile box3-jarvis.yaml                         # the committed cutoffs
+esphome -s wake_cutoff 0.50 compile box3-jarvis.yaml     # a candidate Hey Jarvis cutoff
+esphome -s nabu_cutoff 0.50 compile box3-jarvis.yaml     # a candidate Okay Nabu cutoff
 ```
 
 ## Flash
@@ -82,8 +85,9 @@ differ.
 ## Mascots
 
 `assets/mascots.yaml` is the ESPHome package that loads one animation per mascot
-and state (idle, listen, think, speak) and sets the frame rate of each, as
-`fps_<mascot>_<state>`. The firmware takes the frame count from each file, so an
+and state (idle, listen, think, speak, error) and sets the frame rate of each, as
+`fps_<mascot>_<state>`, and where the mascot sits, as `mascot_x` and `mascot_y`
+(its top-left corner). The firmware takes the frame count from each file, so an
 animation can have any number of frames. Consecutive frames must differ: GIF
 writers merge equal ones, and the firmware ignores frame durations.
 
@@ -99,8 +103,11 @@ python3 -I assets/make_mascots.py
 
 ## Choosing the cutoff
 
-Lower wakes more easily and also mis-wakes more. Test these candidates, one
-flash each, in this order: 0.50, 0.60, 0.70, 0.80.
+Lower wakes more easily and also mis-wakes more. Tune each wake word on its own
+substitution, `wake_cutoff` for Hey Jarvis and `nabu_cutoff` for Okay Nabu. The
+steps below are for Hey Jarvis; for Okay Nabu say "Okay Nabu", grep for
+`wake word detected: Okay Nabu`, and set `nabu_cutoff`. Test these candidates,
+one flash each, in this order: 0.50, 0.60, 0.70, 0.80.
 
 For each candidate:
 
@@ -138,4 +145,4 @@ Record:
 Pick the cutoff with the fewest false wakes among those with at least 18 of 20
 true wakes. The target is at most 1 false wake in 2 hours. If no candidate
 qualifies, add candidates between the best two and repeat. Set the winner as the
-`wake_cutoff` default in `box3-jarvis.yaml`.
+`wake_cutoff` (or `nabu_cutoff`) default in `box3-jarvis.yaml`.

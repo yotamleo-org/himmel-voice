@@ -16,6 +16,8 @@ substitutions:
   wake_cutoff: "0.60"
   # Number of consecutive frames averaged before the cutoff is compared.
   wake_window: "5"
+  # The same for "Okay Nabu": its stock cutoff (0.97) never fires here either.
+  nabu_cutoff: "0.60"
   # The two Assistant selects of this device in Home Assistant, and the pipeline
   # the HIMMEL-7780 daily cap switches them to. The screen shows "Local only" while
   # either select holds the cap pipeline.
@@ -284,6 +286,7 @@ micro_wake_word:
       sliding_window_size: ${wake_window}
     - model: okay_nabu
       id: nabu_ww
+      probability_cutoff: ${nabu_cutoff}
   on_wake_word_detected:
     # The README counts these log lines for true and false wakes.
     - logger.log:
@@ -460,22 +463,21 @@ font:
     glyphsets:
       - GF_Latin_Core
 
-# Plays the mascot animation for the agent and the voice state (an error shows the
-# idle one). Each animation has its own frame count and plays at the frame rate
-# assets/mascots.yaml sets for it.
+# Plays the mascot animation for the agent and the voice state. Each animation has
+# its own frame count and plays at the frame rate assets/mascots.yaml sets for it.
 interval:
   - interval: 50ms
     then:
       - lambda: |-
-          static animation::Animation *const CLIPS[3][4] = {
-              {id(claude_idle), id(claude_listen), id(claude_think), id(claude_speak)},
-              {id(codex_idle), id(codex_listen), id(codex_think), id(codex_speak)},
-              {id(grokbot_idle), id(grokbot_listen), id(grokbot_think), id(grokbot_speak)}};
-          static const float FPS[3][4] = {
-              {${fps_claude_idle}, ${fps_claude_listen}, ${fps_claude_think}, ${fps_claude_speak}},
-              {${fps_codex_idle}, ${fps_codex_listen}, ${fps_codex_think}, ${fps_codex_speak}},
-              {${fps_grokbot_idle}, ${fps_grokbot_listen}, ${fps_grokbot_think}, ${fps_grokbot_speak}}};
-          int a = id(agent), p = id(phase), s = (p >= 1 && p <= 3) ? p : 0;
+          static animation::Animation *const CLIPS[3][5] = {
+              {id(claude_idle), id(claude_listen), id(claude_think), id(claude_speak), id(claude_error)},
+              {id(codex_idle), id(codex_listen), id(codex_think), id(codex_speak), id(codex_error)},
+              {id(grokbot_idle), id(grokbot_listen), id(grokbot_think), id(grokbot_speak), id(grokbot_error)}};
+          static const float FPS[3][5] = {
+              {${fps_claude_idle}, ${fps_claude_listen}, ${fps_claude_think}, ${fps_claude_speak}, ${fps_claude_error}},
+              {${fps_codex_idle}, ${fps_codex_listen}, ${fps_codex_think}, ${fps_codex_speak}, ${fps_codex_error}},
+              {${fps_grokbot_idle}, ${fps_grokbot_listen}, ${fps_grokbot_think}, ${fps_grokbot_speak}, ${fps_grokbot_error}}};
+          int a = id(agent), s = id(phase);
           auto *clip = CLIPS[a][s];
           uint32_t now = millis();
           if (clip != id(mascot_clip)) {
@@ -526,7 +528,7 @@ display:
 
       // The interval below picks the animation and its frame.
       if (id(mascot_clip) != nullptr)
-        it.image(96, 50, id(mascot_clip));
+        it.image(${mascot_x}, ${mascot_y}, id(mascot_clip));
 
       // The reply, or the error, word-wrapped to three lines.
       std::string rest = p == 4 ? id(error_text) : id(reply_text);
