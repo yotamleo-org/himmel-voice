@@ -279,7 +279,7 @@ def append_chief(root, satellite, text, chief):
     try:
         armed = armed_chiefs(dfd, time.time()) if dfd is not None else {}
         if chief is not None:
-            target = chief if chief in armed else None
+            target = next((n for n in armed if n == chief), None)  # the listing's own name, never the request's
             miss = f"no armed chief named {chief}"
         else:
             target = next(iter(armed)) if len(armed) == 1 else None
