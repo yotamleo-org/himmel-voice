@@ -116,24 +116,28 @@ backup() {
 	return "$rc"
 }
 
-# Restarts HA and prints its log from the restart on, once it answers HTTP again.
+# Restarts HA and prints its log from the restart on, once HA has answered HTTP
+# and logged that it finished starting (HTTP comes up before the config entries do).
 restart_and_log() {
-	local since waited=0
+	local since waited=0 log
 	since=$(target date +%s)
 	echo "restarting $container" >&2
-	target docker restart "$container" >/dev/null
-	until target docker exec "$container" python3 -c "$ready_py" "$url" 2>/dev/null; do
+	target docker restart "$container" >/dev/null || return 1
+	until target docker exec "$container" python3 -c "$ready_py" "$url" 2>/dev/null &&
+		log=$(target docker logs --since "$since" "$container" 2>&1) &&
+		grep -q "$initialized_re" <<<"$log"; do
 		if ((waited >= timeout)); then
-			echo "install-override: HA did not answer on $url within ${timeout}s; last log lines:" >&2
+			echo "install-override: HA did not finish starting within ${timeout}s; last log lines:" >&2
 			target docker logs --since "$since" "$container" 2>&1 | tail -n 20 >&2
 			return 1
 		fi
 		sleep 5
 		waited=$((waited + 5))
 	done
-	target docker logs --since "$since" "$container" 2>&1
+	printf '%s\n' "$log"
 }
 
+initialized_re='Home Assistant initialized'
 custom_re='We found a custom integration anthropic '
 recovery_re='[Rr]ecovery mode'
 error_re='(ERROR|CRITICAL).*anthropic'

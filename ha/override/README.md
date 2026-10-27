@@ -38,7 +38,7 @@ ha/override/install-override.sh remove --container homeassistant [--ssh <host>]
 1. checks the bundle's sha256, that every entry is under `anthropic/`, and the manifest version;
 2. moves any existing override to `/config/anthropic-override-backups/` (outside `custom_components`, so HA does not load it);
 3. extracts the bundle into `/config/custom_components/`, then restarts the container;
-4. waits until HA answers HTTP, then reads the log from the restart on.
+4. waits until HA answers HTTP and logs "Home Assistant initialized", then reads the log from the restart on.
 
 It passes only when:
 

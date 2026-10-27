@@ -39,7 +39,7 @@ exec)
 	done
 	exec "${args[@]}"
 	;;
-restart) echo "$*" >>"$FAKE_ROOT/restarts" ;;
+restart) echo "$*" >>"$FAKE_ROOT/restarts"; exit "${FAKE_RESTART_RC:-0}" ;;
 logs) cat "$FAKE_ROOT/log" ;;
 *) exit 99 ;;
 esac
@@ -79,7 +79,8 @@ reset() { # fresh /config holding another custom integration
 	: >"$root/restarts"
 }
 restarts() { wc -l <"$root/restarts"; }
-log() { printf '%s\n' "$@" >"$root/log"; }
+init_line='2026-10-27 12:00:09.000 INFO (MainThread) [homeassistant.bootstrap] Home Assistant initialized in 9.00s'
+log() { printf '%s\n' "$@" "$init_line" >"$root/log"; }
 
 good=$root/good.tar
 make_bundle "$good" '{"domain": "anthropic", "version": "2026.10.1-h7771.test"}'
@@ -146,6 +147,16 @@ reset
 log "$custom_line"
 FAKE_READY_RC=1 install >/dev/null 2>&1
 check "install: HA never ready fails" test $? -eq 1
+
+reset
+printf '%s\n' "$custom_line" >"$root/log"
+install >/dev/null 2>&1
+check "install: HA never initialized fails" test $? -eq 1
+
+reset
+log "$custom_line"
+FAKE_RESTART_RC=1 install >/dev/null 2>&1
+check "install: failed restart fails" test $? -eq 1
 
 reset
 log "$custom_line"
