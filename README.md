@@ -16,7 +16,7 @@ Speech-to-text (faster-whisper, `small-int8`, English) and text-to-speech (Piper
     cd wyoming
     mkdir -p data/whisper data/piper
     sudo chown -R 1000:1000 data
-    echo 'BIND_ADDR=<station LAN address>' > .env
+    echo 'BIND_ADDR=192.0.2.10' > .env    # replace with the station's LAN address
     sudo docker compose --env-file images.lock --env-file .env up -d
 
 The ports bind to 127.0.0.1 unless `BIND_ADDR` is set; `.env` is untracked. The containers run as UID 1000, so `data/` must be theirs.
@@ -27,4 +27,4 @@ Docker's published ports bypass ufw: limit 10200 and 10300 to the Home Assistant
 
 ## ha/
 
-`assist.py` configures Home Assistant Assist over the websocket API: entity exposure (`audit`, `list`, `apply <allowlist>`), the voice pipelines (`pipelines`, `debug`, `voice`) and the satellite's wake words (`satellite`). `HA_URL` and `HA_TOKEN` come from the environment. Locks, alarm panels and grow-stack or heater entities are never exposed. Copy `allowlist.example.txt` to `allowlist.txt` (untracked).
+`assist.py` configures Home Assistant Assist over the websocket API: entity exposure (`audit`, `list`, `apply <allowlist>`), the voice pipelines (`pipelines`, `debug`, `voice`) and the satellite's wake words (`satellite`). `HA_URL` and `HA_TOKEN` come from the environment. `apply` refuses and unexposes locks, alarm panels and grow-stack or heater entities, and `audit` flags any that are exposed; Home Assistant itself installs no deny rule, so run `audit` after exposing anything by hand. Copy `allowlist.example.txt` to `allowlist.txt` (untracked).
