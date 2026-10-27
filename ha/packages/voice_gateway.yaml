@@ -33,7 +33,9 @@ rest_command:
     headers:
       authorization: !secret voice_gateway_auth
     content_type: application/json
-    payload: '{{ {"satellite": satellite, "text": message} | to_json }}'
+    payload: >-
+      {{ ({"satellite": satellite, "text": message, "chief": chief} if chief
+           else {"satellite": satellite, "text": message}) | to_json }}
     timeout: 10
 
 script:
@@ -180,6 +182,13 @@ script:
         required: true
         selector:
           text:
+      chief:
+        description: >-
+          The chief's session name, only when the user names one. Leave it out otherwise: with
+          several chiefs listening the gateway refuses an unnamed message.
+        required: false
+        selector:
+          text:
     variables:
       # secrets.yaml: voice_office_satellite: assist_satellite.<the office BOX-3>. A missing
       # secret stops Home Assistant loading this file, so the script cannot run unrestricted.
@@ -198,6 +207,7 @@ script:
         data:
           satellite: "{{ satellite }}"
           message: "{{ message }}"
+          chief: "{{ chief | default('') }}"
         response_variable: sent
         continue_on_error: true
       - variables:
