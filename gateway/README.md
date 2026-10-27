@@ -19,7 +19,8 @@ The token lives in the keyring and reaches the process through `himmel-secrets e
 On the station, from the repo root, with `HIMMEL_ROOT` set to a himmel checkout and `<vault>` the luna vault:
 
     install -d ~/.local/bin ~/.local/lib/himmel-voice ~/.config/himmel-voice ~/.config/systemd/user
-    ln -sf "$HIMMEL_ROOT/scripts/lib/himmel-secrets" ~/.local/bin/himmel-secrets
+    printf '#!/bin/sh\nexec "%s/scripts/lib/himmel-secrets" "$@"\n' "$HIMMEL_ROOT" > ~/.local/bin/himmel-secrets
+    chmod 755 ~/.local/bin/himmel-secrets    # a wrapper, not a symlink: himmel-secrets loads files beside its real path
     install -m 644 gateway/gateway.py ~/.local/lib/himmel-voice/
     install -m 600 gateway/gateway.env.example ~/.config/himmel-voice/gateway.env    # then edit it
     openssl rand -hex 32 | ~/.local/bin/himmel-secrets put --stdin VOICE_GATEWAY_TOKEN
@@ -27,7 +28,7 @@ On the station, from the repo root, with `HIMMEL_ROOT` set to a himmel checkout 
     sudo install -m 755 gateway/input-rule.sh /usr/local/sbin/voice-gateway-input-rule
     sudo install -m 644 gateway/voice-gateway-input.service /etc/systemd/system/
     sudo install -d -m 755 /etc/himmel-voice
-    test -f /etc/himmel-voice/docker-user.env || echo 'HA_HOST=192.0.2.5' | sudo tee /etc/himmel-voice/docker-user.env    # the Home Assistant host
+    test -f /etc/himmel-voice/docker-user.env || echo 'HA_HOST=<Home Assistant IPv4 address>' | sudo tee /etc/himmel-voice/docker-user.env    # the real address: a placeholder fails closed
     sudo systemctl daemon-reload
     sudo systemctl enable --now voice-gateway-input.service
     sudo iptables -S VOICE-GATEWAY-INPUT    # lo RETURN, the HA_HOST RETURN, then the DROP
@@ -45,9 +46,9 @@ The port and `HA_HOST` live in two files: the fence reads `/etc/himmel-voice/doc
 In Home Assistant:
 
 1. In `configuration.yaml`, under `homeassistant:`, add `packages: !include_dir_named packages` if it is not there. Then copy `ha/packages/voice_gateway.yaml` to `/config/packages/`.
-2. In `secrets.yaml`, add `voice_gateway_note_url` and `voice_gateway_search_url` (`http://<station LAN address>:8740/note` and `/search`), and `voice_gateway_auth: Bearer <token>`. `himmel-secrets get VOICE_GATEWAY_TOKEN` prints the token, so run it only in a terminal of your own.
+2. In `secrets.yaml`, add `voice_gateway_note_url` and `voice_gateway_search_url` (`http://<station LAN address>:8740/note` and `/search`), and `voice_gateway_auth: Bearer <token>`. `himmel-secrets get VOICE_GATEWAY_TOKEN | wl-copy` puts the token on the clipboard without showing it; paste it in place of `<token>`.
 3. In `research_async`, replace the placeholder agent ids and the satellite id with the real ones (Developer tools, States).
 4. Check the configuration, then restart Home Assistant.
-5. Expose `script.save_note`, `script.research` and `script.search_luna` to Assist: add them to `ha/allowlist.txt` and run `assist.py apply`. Do not expose `research_async`.
+5. Expose `script.save_note`, `script.research` and `script.search_luna` to Assist: add them to `ha/allowlist.txt` and run `himmel-secrets exec --keys HA_TOKEN -- python3 -I ha/assist.py apply ha/allowlist.txt` (with `HA_URL` set). Do not expose `research_async`.
 
 Two traces prove it: "Okay Nabu, research X and save it" (a note appears in `00-Inbox/voice/`, then the box announces it), and "Hey Jarvis, what did Codex find about X?" (the answer comes from that note).

@@ -96,8 +96,9 @@ script:
   research_async:
     alias: Research (background run)
     description: Started by script.research; do not call it directly.
-    mode: parallel
-    max: 3
+    # Queued, not parallel: a request beyond the running one waits its turn instead of being dropped.
+    mode: queued
+    max: 10
     fields:
       topic:
         required: true
@@ -149,7 +150,8 @@ script:
     alias: Search luna
     description: >-
       Search the saved voice notes in luna, for example what Codex or Claude found about a
-      topic. Returns up to five notes with a title, path and snippet.
+      topic. Returns up to five notes with a title, path and snippet; ok is false when the
+      search itself failed, which is not the same as no matches.
     mode: parallel
     fields:
       query:
@@ -165,6 +167,7 @@ script:
         continue_on_error: true
       - variables:
           result:
+            ok: "{{ found is defined and found.status == 200 }}"
             results: "{{ found.content.results if found is defined and found.status == 200 else [] }}"
       - stop: Done
         response_variable: result

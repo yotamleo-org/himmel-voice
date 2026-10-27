@@ -125,8 +125,12 @@ def write_note(vault_fd, title, body, brain):
             name = f"{stem}.md" if n == 1 else f"{stem}-{n}.md"
             if not NOTE_NAME.fullmatch(name):  # a bare file name, never a path
                 raise ValueError(f"not a note name: {name!r}")
+            path = os.path.normpath(os.path.join(INBOX, name))
+            if not path.startswith(INBOX + os.sep):
+                raise ValueError(f"not a note name: {name!r}")
+            leaf = os.path.basename(path)
             try:
-                fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                fd = os.open(leaf, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
                              0o644, dir_fd=dfd)
             except FileExistsError:
                 continue
@@ -134,9 +138,9 @@ def write_note(vault_fd, title, body, brain):
                 with os.fdopen(fd, "wb") as f:
                     f.write(data)
             except OSError:
-                os.unlink(name, dir_fd=dfd)  # never leave an empty or truncated note behind
+                os.unlink(leaf, dir_fd=dfd)  # never leave an empty or truncated note behind
                 raise
-            return f"00-Inbox/voice/{name}"
+            return f"00-Inbox/voice/{leaf}"
     finally:
         os.close(dfd)
     raise FileExistsError(stem)
