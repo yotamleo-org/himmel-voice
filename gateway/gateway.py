@@ -276,8 +276,8 @@ def append_chief(root, satellite, text, chief):
         dfd = os.open(os.path.join(root, "consoles"), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
     except OSError:
         dfd = None
-    armed = armed_chiefs(dfd, time.time()) if dfd is not None else {}
     try:
+        armed = armed_chiefs(dfd, time.time()) if dfd is not None else {}
         if chief is not None:
             target = chief if chief in armed else None
             miss = f"no armed chief named {chief}"

@@ -379,6 +379,14 @@ class ChiefTests(Base):
         self.assertEqual(self.ask()[0], 409)
         self.assertEqual(os.path.getsize(victim), 0)
 
+    def test_a_failed_heartbeat_scan_is_500_and_leaks_no_descriptor(self):
+        self.arm()
+        self.start(VOICE_GATEWAY_BRIDGE_ROOT=self.bridge)
+        before = len(os.listdir("/proc/self/fd"))
+        with mock.patch.object(gateway, "armed_chiefs", side_effect=OSError("boom")):
+            self.assertEqual(self.ask()[0], 500)
+        self.assertEqual(len(os.listdir("/proc/self/fd")), before)
+
     def test_unset_bridge_root_defaults_under_home(self):
         cfg = gateway.load_config({"VOICE_GATEWAY_TOKEN": TOKEN, "VOICE_GATEWAY_VAULT": self.vault})
         os.close(cfg["vault_fd"])
