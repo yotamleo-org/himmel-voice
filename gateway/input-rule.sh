@@ -22,17 +22,22 @@ fi
 
 chain=VOICE-GATEWAY-INPUT
 iptables -w -n -L "$chain" >/dev/null 2>&1 || iptables -w -N "$chain"
-# The chain is never flushed, so the fence never stands empty: the RETURN rules go in at the
-# top and the DROP at the bottom, each only if missing, then every other rule (an earlier
-# HA_HOST or port) is deleted.
+# The chain is never flushed, so the fence never stands empty: lo RETURN first, then the
+# HA_HOST RETURN, the DROP last, each added only if missing; then every other rule (an earlier
+# HA_HOST or port) is deleted, and the three are checked again.
+lo=(-i lo -j RETURN)
+ha=(-p tcp --dport "$port" -s "$ha_host" -j RETURN)
+drop=(-p tcp --dport "$port" -j DROP)
 want=("-A $chain -i lo -j RETURN"
       "-A $chain -s $ha_host/32 -p tcp -m tcp --dport $port -j RETURN"
       "-A $chain -p tcp -m tcp --dport $port -j DROP")
-iptables -w -C "$chain" -p tcp --dport "$port" -s "$ha_host" -j RETURN 2>/dev/null \
-    || iptables -w -I "$chain" 1 -p tcp --dport "$port" -s "$ha_host" -j RETURN
-iptables -w -C "$chain" -i lo -j RETURN 2>/dev/null || iptables -w -I "$chain" 1 -i lo -j RETURN
-iptables -w -C "$chain" -p tcp --dport "$port" -j DROP 2>/dev/null \
-    || iptables -w -A "$chain" -p tcp --dport "$port" -j DROP
+if ! iptables -w -C "$chain" "${ha[@]}" 2>/dev/null; then
+    pos=1
+    iptables -w -C "$chain" "${lo[@]}" 2>/dev/null && pos=2
+    iptables -w -I "$chain" "$pos" "${ha[@]}"
+fi
+iptables -w -C "$chain" "${lo[@]}" 2>/dev/null || iptables -w -I "$chain" 1 "${lo[@]}"
+iptables -w -C "$chain" "${drop[@]}" 2>/dev/null || iptables -w -A "$chain" "${drop[@]}"
 while IFS= read -r line; do
     case "$line" in -A*) ;; *) continue ;; esac
     keep=0
@@ -41,4 +46,13 @@ while IFS= read -r line; do
     read -ra del <<<"${line/#-A/-D}"
     iptables -w "${del[@]}"
 done < <(iptables -w -S "$chain")
+# The delete loop matches iptables -S text; if a build prints a rule another way, it may have
+# deleted one of the three. Fail loudly rather than leave the fence open.
+for rule in lo ha drop; do
+    declare -n r=$rule
+    if ! iptables -w -C "$chain" "${r[@]}" 2>/dev/null; then
+        echo "input-rule.sh: the $rule rule is missing from $chain after cleanup: the fence is incomplete" >&2
+        exit 1
+    fi
+done
 iptables -w -C INPUT -j "$chain" 2>/dev/null || iptables -w -I INPUT 1 -j "$chain"

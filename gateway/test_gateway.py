@@ -141,12 +141,16 @@ class NoteTests(Base):
         self.assertEqual(self.files(self.inbox), [])
 
     def test_a_name_outside_the_note_shape_is_never_opened(self):
+        # The first component exists, so without the guard the open would climb out to outside/.
+        hop = f"{gateway.today()}-codex-x"
+        os.mkdir(os.path.join(self.inbox, hop))
         self.start()
-        with mock.patch.object(gateway, "slugify", return_value="x/../../outside/pwn"):
+        with mock.patch.object(gateway, "slugify", return_value="x/../../../../outside/pwn"):
             with self.assertRaises(ValueError):
                 gateway.write_note(self.server.RequestHandlerClass.cfg["vault_fd"], "t", "b", "codex")
             self.assertEqual(self.call("POST", "/note", NOTE)[0], 500)
-        self.assertEqual(self.files(self.inbox), [])
+        self.assertEqual(self.files(self.inbox), [hop])
+        self.assertEqual(self.files(os.path.join(self.inbox, hop)), [])
         self.assertEqual(self.files(self.outside), [])
 
     def test_symlink_at_target_name_is_not_followed(self):
