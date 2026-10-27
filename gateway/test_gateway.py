@@ -426,12 +426,16 @@ class ChiefTests(Base):
         self.assertEqual(self.ask()[0], 409)
         self.assertEqual(self.lines(inbox), [])
 
+    @unittest.skipUnless(os.path.isdir("/proc/self/fd"), "needs /proc/self/fd")
     def test_a_failed_heartbeat_scan_is_500_and_leaks_no_descriptor(self):
         self.arm()
         self.start(VOICE_GATEWAY_BRIDGE_ROOT=self.bridge)
         before = len(os.listdir("/proc/self/fd"))
         with mock.patch.object(gateway, "armed_chiefs", side_effect=OSError("boom")):
             self.assertEqual(self.ask()[0], 500)
+        deadline = time.time() + 2  # the server thread closes its connection socket after replying
+        while len(os.listdir("/proc/self/fd")) != before and time.time() < deadline:
+            time.sleep(0.01)
         self.assertEqual(len(os.listdir("/proc/self/fd")), before)
 
     def test_unset_bridge_root_defaults_under_home(self):
