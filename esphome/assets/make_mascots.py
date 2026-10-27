@@ -52,6 +52,8 @@ def put(grid, x, y, rows):
     for dy, row in enumerate(rows):
         for dx, ch in enumerate(row):
             if ch != " ":
+                # A negative index would wrap to the far edge instead of failing.
+                assert 0 <= x + dx < GRID and 0 <= y + dy < GRID, (x + dx, y + dy)
                 grid[y + dy][x + dx] = ch
 
 
@@ -169,7 +171,7 @@ def term(state, frame):
     if state == "listen":
         sound_arcs(g, frame, 4, 27, 10)
     if state == "think":
-        think_dots(g, frame, 22, 0)
+        think_dots(g, frame, 22, 3)
     return g
 
 
