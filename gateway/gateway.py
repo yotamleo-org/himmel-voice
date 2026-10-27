@@ -1,4 +1,4 @@
-"""voice-gateway: the voice brains save notes to the luna inbox and search them (HIMMEL-7734).
+"""voice-gateway: the voice brains save notes to the luna inbox, search them and reach the chief (HIMMEL-7734, HIMMEL-7735).
 
 Usage:
   himmel-secrets exec --keys VOICE_GATEWAY_TOKEN -- python3 -I gateway.py
@@ -7,6 +7,9 @@ Routes, POST only, each behind `Authorization: Bearer <VOICE_GATEWAY_TOKEN>`:
   /note    {"title", "body", "brain"} creates <vault>/00-Inbox/voice/<date>-<brain>-<slug>.md
            and nothing else: never an edit, never a delete, never a new directory.
   /search  {"q"} returns up to 5 {path, title, snippet}, read-only, from the search dirs only.
+  /chief   {"satellite", "text", "chief"?} appends one `- HH:MM [voice satellite=<id> UNVERIFIED-SPEAKER] <text>`
+           line to the inbox of an armed chief and nothing else: never a create, truncate or rename.
+           The named chief, else the single armed one; none or several armed = 409, nothing written.
 
 Environment:
   VOICE_GATEWAY_TOKEN        the bearer token, at least 32 characters (keyring, never a file)
@@ -15,6 +18,8 @@ Environment:
   VOICE_GATEWAY_PORT         default 8740
   VOICE_GATEWAY_SEARCH_DIRS  colon-separated vault subdirectories /search reads (default
                              00-Inbox/voice). What it returns goes to cloud LLMs.
+  VOICE_GATEWAY_BRIDGE_ROOT  the himmel bridge state dir whose consoles/ holds the chief inboxes
+                             (default ~/.claude/handover/bridge)
   HA_HOST                    the Home Assistant host; required when the bind is not loopback.
                              Only HA_HOST and the bind address itself may connect.
 Exit: 2 on a configuration error.
@@ -28,6 +33,7 @@ import os
 import re
 import stat
 import sys
+import time
 import unicodedata
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -37,6 +43,12 @@ INBOX = os.path.join("00-Inbox", "voice")
 BRAIN = re.compile(r"[a-z][a-z0-9-]{0,23}")
 PATHLIKE = re.compile(r"^[/\\]|(^|[/\\])\.\.([/\\]|$)|\x00")
 NOTE_NAME = re.compile(r"\d{4}-\d{2}-\d{2}-[a-z][a-z0-9-]{0,23}-[a-z0-9-]{1,60}(-\d{1,2})?\.md")
+CHIEF_NAME = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}")
+SATELLITE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+WAIT = re.compile(r"hb=(\d+) pid=\d+ key=\S+ tick=(?:ok|fail|-) state=(waiting|sampling|exited)(?: exit=(\S+))?")
+LIVE_MAX_AGE = 300  # a chief mid-turn has no fresh heartbeat but still reads its inbox: busy
+BUSY_MAX_AGE = 1800  # past this a chief is treated as released or dead
+CHIEF_TEXT_MAX = 500
 RESULTS = 5
 SNIPPET = 600
 
@@ -75,11 +87,13 @@ def load_config(env):
         if not inside(real, vault) or not os.path.isdir(real):
             die(f"search dir {rel!r} is not a directory inside the vault")
         search_dirs.append(os.path.relpath(real, vault))
+    bridge_root = os.path.realpath(env.get("VOICE_GATEWAY_BRIDGE_ROOT")
+                                   or os.path.join(os.path.expanduser("~"), ".claude", "handover", "bridge"))
     peers = {str(bind)} | ({str(ha_host)} if ha_host else set())
     # Held for the process lifetime: a vault or ancestor swapped for a link later changes nothing.
     vault_fd = os.open(vault, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
     return {"token": token, "vault": vault, "vault_fd": vault_fd, "bind": str(bind), "port": port,
-            "peers": peers, "search_dirs": search_dirs}
+            "peers": peers, "search_dirs": search_dirs, "bridge_root": bridge_root}
 
 
 def today():
@@ -222,6 +236,73 @@ def search(cfg, q):
     return out
 
 
+def fold(text):
+    """One line, length-capped: a line break would let the text start a line of its own."""
+    one = re.sub(r"[\x00-\x1f\x7f]", " ", " ⏎ ".join(text.strip().splitlines())).strip()
+    return one if len(one) <= CHIEF_TEXT_MAX else one[:CHIEF_TEXT_MAX - 1] + "…"
+
+
+def armed_chiefs(dfd, now):
+    """{name: busy} for each chief with a regular-file inbox and a live waiter heartbeat.
+
+    The same test as chief-route.ts armedConsoles, over the consoles dir fd."""
+    armed = {}
+    for entry in sorted(os.listdir(dfd)):
+        name = entry[:-8]
+        if not entry.endswith(".md.wait") or not CHIEF_NAME.fullmatch(name) or ".." in name:
+            continue
+        raw = read_note(dfd, entry)
+        m = WAIT.fullmatch(raw[0].strip()) if raw is not None else None
+        if not m:
+            continue
+        age = now - int(m.group(1))
+        exited = m.group(2) == "exited"
+        if age < 0 or age >= BUSY_MAX_AGE or (exited and not (m.group(3) or "").startswith("wake-")):
+            continue
+        try:
+            if not stat.S_ISREG(os.stat(f"{name}.md", dir_fd=dfd, follow_symlinks=False).st_mode):
+                continue
+        except OSError:
+            continue
+        armed[name] = exited or age >= LIVE_MAX_AGE
+    return armed
+
+
+def append_chief(root, satellite, text, chief):
+    """Append one tagged line to an armed chief's inbox; return (status, body).
+
+    Opens O_APPEND with no O_CREAT, so an inbox deleted a moment ago is never recreated."""
+    try:
+        dfd = os.open(os.path.join(root, "consoles"), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except OSError:
+        dfd = None
+    armed = armed_chiefs(dfd, time.time()) if dfd is not None else {}
+    try:
+        if chief is not None:
+            target = chief if chief in armed else None
+            miss = f"no armed chief named {chief}"
+        else:
+            target = next(iter(armed)) if len(armed) == 1 else None
+            miss = f"{len(armed)} chiefs are armed; name one" if armed else "no chief is armed"
+        if target is None:
+            return 409, {"error": miss}
+        line = f"- {datetime.datetime.now().strftime('%H:%M')} [voice satellite={satellite} UNVERIFIED-SPEAKER] {fold(text)}\n"
+        data = line.encode("utf-8")  # raises before any write, e.g. on a lone surrogate
+        try:
+            fd = os.open(f"{target}.md", os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC,
+                         dir_fd=dfd)
+        except OSError:
+            return 409, {"error": f"chief {target} is not listening"}
+        with os.fdopen(fd, "ab") as f:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                return 409, {"error": f"chief {target} is not listening"}
+            f.write(data)
+        return 200, {"chief": target, "busy": armed[target]}
+    finally:
+        if dfd is not None:
+            os.close(dfd)
+
+
 class Handler(BaseHTTPRequestHandler):
     timeout = 15
     cfg = None
@@ -244,7 +325,7 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(401, {"error": "unauthorized"})
             return None
         route = self.path.split("?", 1)[0]
-        if route not in ("/note", "/search"):
+        if route not in ("/note", "/search", "/chief"):
             self.reply(404, {"error": "not found"})
             return None
         if self.command != "POST":
@@ -296,6 +377,23 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply(403, {"error": "the inbox is not a plain directory inside the vault"})
                 return
             self.reply(201, {"path": path})
+        elif route == "/chief":
+            satellite, text, chief = data.get("satellite"), data.get("text"), data.get("chief")
+            if not (isinstance(satellite, str) and SATELLITE.fullmatch(satellite) and ".." not in satellite
+                    and isinstance(text, str) and text.strip() and len(text) <= MAX_BODY
+                    and (chief is None or (isinstance(chief, str) and CHIEF_NAME.fullmatch(chief)
+                                           and ".." not in chief))):
+                self.reply(400, {"error": "satellite, text and an optional plain chief name are required"})
+                return
+            try:
+                status, out = append_chief(self.cfg["bridge_root"], satellite, text, chief)
+            except UnicodeEncodeError:
+                self.reply(400, {"error": "text must be valid text"})
+                return
+            except OSError:
+                self.reply(500, {"error": "the chief inbox could not be written"})
+                return
+            self.reply(status, out)
         else:
             q = data.get("q")
             if not isinstance(q, str) or not q.strip() or len(q) > 200:
