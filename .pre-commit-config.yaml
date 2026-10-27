@@ -1,0 +1,40 @@
+# himmel pre-commit core (docs/internals/fork-precommit.md in himmel), for a
+# first-party repo: no upstream, so it lives at the root. Install once per clone:
+#   pre-commit install -t pre-commit -t commit-msg
+# leak-classes runs himmel's own gate, so HIMMEL_ROOT must point at a himmel checkout.
+# Pins match himmel's .pre-commit-config.yaml.
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+        args: [--config=.gitleaks.toml]
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: no-commit-to-branch
+        args: [--branch, main]
+
+  - repo: local
+    hooks:
+      - id: leak-classes
+        name: leak-class gate (home-path, mac, private-lan-ip, hostname, telegram token)
+        language: system
+        entry: bash -c 'exec bash "${HIMMEL_ROOT:?set HIMMEL_ROOT to a himmel checkout}/scripts/guardrails/leak-classes.sh" --staged'
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
+      # commit-msg: conventional subject carrying a HIMMEL-<n> ticket; only the
+      # subjects git itself generates (Merge branch '..', Merge pull request #..,
+      # Merge remote-tracking branch '..', Revert "..") skip the ticket.
+      # --multiline matches the whole message, so \A pins the check to the subject;
+      # --negate fails when there is no match.
+      - id: himmel-ticket-id
+        name: conventional commit subject with a HIMMEL-<n> ticket ID
+        language: pygrep
+        entry: '\A((feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^)\n]+\))?!?: [^\n]*HIMMEL-[0-9]+|Merge branch ''[^''\n]+''(?: (?:into|of) [^\n]+)?(?:\n|\Z)|Merge pull request #[0-9]+ from \S+(?:\n|\Z)|Merge remote-tracking branch ''[^''\n]+''(?: (?:into|of) [^\n]+)?(?:\n|\Z)|Revert "[^\n]+"(?:\n|\Z))'
+        args: [--negate, --multiline]
+        always_run: true
+        stages: [commit-msg]

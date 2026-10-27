@@ -1,0 +1,6 @@
+# One entity id per line; # starts a comment. Copy to allowlist.txt (untracked).
+# lock.*, alarm_control_panel.* and anything named grow/tent/ggs/bluelab/guardian/bucket,
+# heater or towel warmer are refused.
+light.office
+media_player.office
+weather.home
