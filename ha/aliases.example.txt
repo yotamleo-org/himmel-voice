@@ -1,0 +1,3 @@
+# One "entity_id: spoken name, spoken name" per line; # starts a comment. Copy to aliases.txt (untracked).
+# Each entity's Assist aliases are set to exactly this list.
+fan.example_purifier: air purifier, purifier, example room purifier

@@ -5,3 +5,4 @@ wyoming/data/
 *.env.local
 # the entity ids your home exposes to Assist stay local
 ha/allowlist.txt
+ha/aliases.txt

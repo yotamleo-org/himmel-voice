@@ -38,3 +38,5 @@ To change `HA_HOST`, edit the file and run `sudo systemctl reload wyoming-docker
 ## ha/
 
 `assist.py` configures Home Assistant Assist over the websocket API: entity exposure (`audit`, `list`, `apply <allowlist>`), the voice pipelines (`pipelines`, `debug`, `voice`) and the satellite's wake words (`satellite`). `HA_URL` and `HA_TOKEN` come from the environment. `apply` refuses and unexposes locks, alarm panels and grow-stack or heater entities, and `audit` flags any that are exposed; Home Assistant itself installs no deny rule, so run `audit` after exposing anything by hand. Copy `allowlist.example.txt` to `allowlist.txt` (untracked).
+
+`aliases <file> [--dry-run]` sets each listed entity's Assist aliases (the spoken names) to exactly the file's list, then re-reads and reports what is still missing; run it with `--dry-run` first. Copy `aliases.example.txt` to `aliases.txt` (untracked). `python3 -I ha/test_assist.py` runs the tests against a stub websocket.
