@@ -10,6 +10,7 @@ in flash as raw RGB565, so their total must fit FLASH_BUDGET. Stdlib only:
   python3 -I check_sprites.py
 """
 
+import math
 import pathlib
 import re
 import sys
@@ -43,7 +44,9 @@ def lzw_decode(data, min_size, count):
     table = [bytes([i]) for i in range(clear)] + [b"", b""]
     size, prev, out = min_size + 1, None, bytearray()
     bits, nbits, pos = int.from_bytes(data, "little"), len(data) * 8, 0
-    while pos + size <= nbits and len(out) < count:
+    while True:
+        if pos + size > nbits:
+            raise ValueError("image data has no end code")
         code = (bits >> pos) & ((1 << size) - 1)
         pos += size
         if code == clear:
@@ -65,9 +68,9 @@ def lzw_decode(data, min_size, count):
         prev = entry
         if len(table) == 1 << size and size < 12:
             size += 1
-    if len(out) < count:
-        raise ValueError("image data ends early")
-    return bytes(out[:count])
+    if len(out) != count:
+        raise ValueError(f"image data holds {len(out)} pixels, want {count}")
+    return bytes(out)
 
 
 def sub_blocks(data, pos):
@@ -197,7 +200,8 @@ def main():
         for state, (least, most) in STATES.items():
             name = f"{agent}_{state}"
             try:
-                if float(subs.get(f"fps_{name}", "")) <= 0:
+                fps = float(subs.get(f"fps_{name}", ""))
+                if not math.isfinite(fps) or fps <= 0:
                     raise ValueError
             except ValueError:
                 errors.append(f"mascots.yaml: fps_{name} missing or not a positive number")
