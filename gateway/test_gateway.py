@@ -102,7 +102,7 @@ class NoteTests(Base):
     def test_path_escapes_refused(self):
         for bad in ({**NOTE, "title": "../../outside/x"}, {**NOTE, "title": "/etc/passwd"},
                     {**NOTE, "title": "..\\..\\x"}, {**NOTE, "brain": "../x"},
-                    {**NOTE, "brain": "/abs"}, {**NOTE, "brain": "Codex Two"}):
+                    {**NOTE, "brain": "/abs"}, {**NOTE, "brain": "Codex Two"}, {**NOTE, "brain": "codex\n"}):
             self.assertEqual(self.call("POST", "/note", bad)[0], 400, bad)
         self.assertEqual(self.files(self.inbox), [])
         self.assertEqual(self.files(self.outside), [])
@@ -113,6 +113,14 @@ class NoteTests(Base):
         os.symlink(self.outside, self.inbox)
         self.assertEqual(self.call("POST", "/note", NOTE)[0], 403)
         self.assertEqual(self.files(self.outside), [])
+
+    def test_inbox_parent_symlinked_out_after_start_refused(self):
+        self.start()
+        os.makedirs(os.path.join(self.outside, "voice"))
+        os.rename(os.path.join(self.vault, "00-Inbox"), os.path.join(self.tmp.name, "moved"))
+        os.symlink(self.outside, os.path.join(self.vault, "00-Inbox"))
+        self.assertEqual(self.call("POST", "/note", NOTE)[0], 403)
+        self.assertEqual(self.files(os.path.join(self.outside, "voice")), [])
 
     def test_symlink_at_target_name_is_not_followed(self):
         victim = os.path.join(self.outside, "victim.md")
@@ -168,6 +176,20 @@ class SearchTests(Base):
         os.symlink(os.path.join(self.outside, "leak.md"), os.path.join(self.inbox, "leak.md"))
         os.symlink(self.outside, os.path.join(self.inbox, "dir"))
         self.assertEqual(self.call("POST", "/search", {"q": "heat"})[1]["results"], [])
+
+    def test_search_root_swapped_for_symlink_after_start_not_followed(self):
+        with open(os.path.join(self.outside, "leak.md"), "w") as f:
+            f.write("heat pumps leaked")
+        self.start()
+        os.rmdir(self.inbox)
+        os.symlink(self.outside, self.inbox)
+        self.assertEqual(self.call("POST", "/search", {"q": "heat"})[1]["results"], [])
+
+    def test_search_keeps_the_best_five(self):
+        for i in range(8):
+            self.write(f"00-Inbox/voice/n{i}.md", "heat " * (i + 1))
+        paths = [r["path"] for r in self.call("POST", "/search", {"q": "heat"})[1]["results"]]
+        self.assertEqual(paths, [f"00-Inbox/voice/n{i}.md" for i in (7, 6, 5, 4, 3)])
 
     def test_search_needs_token_and_post(self):
         self.assertEqual(self.call("POST", "/search", {"q": "heat"}, token=None)[0], 401)

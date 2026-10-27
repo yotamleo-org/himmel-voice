@@ -20,11 +20,13 @@ Environment:
 Exit: 2 on a configuration error.
 """
 import datetime
+import heapq
 import hmac
 import ipaddress
 import json
 import os
 import re
+import stat
 import sys
 import unicodedata
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -32,7 +34,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 MAX_BODY = 64 * 1024
 MAX_READ = 256 * 1024
 INBOX = os.path.join("00-Inbox", "voice")
-BRAIN = re.compile(r"^[a-z][a-z0-9-]{0,23}$")
+BRAIN = re.compile(r"[a-z][a-z0-9-]{0,23}")
 PATHLIKE = re.compile(r"^[/\\]|(^|[/\\])\.\.([/\\]|$)|\x00")
 RESULTS = 5
 SNIPPET = 600
@@ -88,15 +90,21 @@ def slugify(title):
 
 def write_note(vault, title, body, brain):
     """Create one inbox file; return its vault-relative path, or None if the inbox is not confined."""
-    inbox = os.path.join(vault, INBOX)
-    if os.path.realpath(inbox) != inbox or not os.path.isdir(inbox):
-        return None
     created = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
     text = (f"---\ntitle: {json.dumps(title, ensure_ascii=False)}\nbrain: {brain}\n"
             f"created: {created}\nsource: voice-gateway\ntags: [voice]\n---\n\n{body.rstrip()}\n")
     stem = f"{today()}-{brain}-{slugify(title)}"
-    dfd = os.open(inbox, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    # Walk vault -> 00-Inbox -> voice through dir fds, refusing a symlink at every step, so a
+    # component swapped for a link after any check cannot redirect the write.
+    dfd = os.open(vault, os.O_RDONLY | os.O_DIRECTORY)
     try:
+        for part in INBOX.split(os.sep):
+            try:
+                nfd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dfd)
+            except OSError:
+                return None
+            os.close(dfd)
+            dfd = nfd
         for n in range(1, 100):
             name = f"{stem}.md" if n == 1 else f"{stem}-{n}.md"
             try:
@@ -128,30 +136,46 @@ def split_note(text, fallback):
     return str(title), body
 
 
+def read_note(dfd, name):
+    """Read a regular file under dfd without following a symlink; None if it is not one."""
+    try:
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=dfd)
+    except OSError:
+        return None
+    with os.fdopen(fd, encoding="utf-8", errors="replace") as f:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            return None
+        return f.read(MAX_READ), st.st_mtime
+
+
 def search(cfg, q):
     terms = list(dict.fromkeys(t for t in re.findall(r"\w+", q.lower()) if len(t) >= 3))[:8]
-    hits, seen = [], set()
+    best, seen = [], set()
     for root in cfg["search_dirs"]:
-        for d, dirs, files in os.walk(root):
-            dirs[:] = [x for x in dirs if not x.startswith(".") and not os.path.islink(os.path.join(d, x))]
+        # fwalk never follows a symlink, the root included, and opens each level by dir fd.
+        for d, dirs, files, dfd in os.fwalk(root, follow_symlinks=False):
+            dirs[:] = [x for x in dirs if not x.startswith(".")]
             for name in files:
                 p = os.path.join(d, name)
-                if not name.endswith(".md") or p in seen or os.path.islink(p):
+                if not name.endswith(".md") or p in seen:
                     continue
                 seen.add(p)
-                try:
-                    with open(p, encoding="utf-8", errors="replace") as f:
-                        text = f.read(MAX_READ)
-                    mtime = os.path.getmtime(p)
-                except OSError:
+                got = read_note(dfd, name)
+                if got is None:
                     continue
+                text, mtime = got
                 low = text.lower()
                 matched = [t for t in terms if t in low]
-                if matched:
-                    hits.append(((len(matched), sum(low.count(t) for t in matched), mtime), p, text, matched))
-    hits.sort(key=lambda h: h[0], reverse=True)
+                if not matched:
+                    continue
+                item = ((len(matched), sum(low.count(t) for t in matched), mtime), len(seen), p, text, matched)
+                if len(best) < RESULTS:
+                    heapq.heappush(best, item)
+                else:
+                    heapq.heappushpop(best, item)
     out = []
-    for _, p, text, matched in hits[:RESULTS]:
+    for _, _, p, text, matched in sorted(best, reverse=True):
         title, body = split_note(text, os.path.splitext(os.path.basename(p))[0])
         at = max(body.lower().find(matched[0]), 0)
         start = max(at - SNIPPET // 3, 0)
@@ -219,7 +243,7 @@ class Handler(BaseHTTPRequestHandler):
         if route == "/note":
             title, body, brain = data.get("title"), data.get("body"), data.get("brain")
             if not (isinstance(title, str) and isinstance(body, str) and isinstance(brain, str)
-                    and title.strip() and len(title) <= 200 and BRAIN.match(brain)
+                    and title.strip() and len(title) <= 200 and BRAIN.fullmatch(brain)
                     and not PATHLIKE.search(title)):
                 self.reply(400, {"error": "title (no path), body and brain ([a-z0-9-]) are required"})
                 return

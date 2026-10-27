@@ -57,10 +57,11 @@ script:
           body: "{{ body }}"
           brain: "{{ brain }}"
         response_variable: saved
+        continue_on_error: true
       - variables:
           result:
-            saved: "{{ saved.status == 201 }}"
-            path: "{{ saved.content.path if saved.status == 201 else '' }}"
+            saved: "{{ saved is defined and saved.status == 201 }}"
+            path: "{{ saved.content.path if saved is defined and saved.status == 201 else '' }}"
       - stop: Saved
         response_variable: result
 
@@ -123,11 +124,14 @@ script:
           title: "{{ topic }}"
           body: "{{ answer.response.speech.plain.speech }}"
           brain: "{{ brain }}"
+        response_variable: note
       - action: assist_satellite.announce
         target:
           entity_id: "{{ satellite }}"
         data:
-          message: "Research on {{ topic }} is ready."
+          message: >-
+            {{ 'Research on ' ~ topic ~ ' is ready.' if note.saved
+               else 'Research on ' ~ topic ~ ' could not be saved.' }}
 
   search_luna:
     alias: Search luna
@@ -146,8 +150,9 @@ script:
         data:
           query: "{{ query }}"
         response_variable: found
+        continue_on_error: true
       - variables:
           result:
-            results: "{{ found.content.results if found.status == 200 else [] }}"
+            results: "{{ found.content.results if found is defined and found.status == 200 else [] }}"
       - stop: Done
         response_variable: result
