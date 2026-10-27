@@ -1,9 +1,34 @@
-# BOX-3 firmware: "Hey Jarvis" on a tuned cutoff
+# BOX-3 firmware: three wake words, a status screen and mascots
 
 `box3-jarvis.yaml` is the ESPHome config for the ESP32-S3-BOX-3 voice satellite
 (HIMMEL-7777, tracker HIMMEL-7719). The wake word runs on the device, so the
 cutoff is a firmware setting: the stock `hey_jarvis` cutoff (0.97) never fires on
 this hardware. The cutoff is the `wake_cutoff` substitution at the top of the file.
+
+The screen (HIMMEL-7815) shows the agent the wake word called and its pixel-art
+mascot, the voice state (Ready, Listening, Thinking, Speaking, Error, Muted,
+Offline), the reply text or the error, and an amber "Local only" banner while the
+HIMMEL-7780 daily cap holds.
+
+| Wake word   | Agent   | Home Assistant slot |
+| ----------- | ------- | ------------------- |
+| Hey Jarvis  | Claude  | 1                   |
+| Hey Mycroft | Codex   | 2                   |
+| Hey Grok    | Grokbot | 2 (internal model)  |
+
+Home Assistant gives a satellite two wake word slots, each with its own pipeline.
+"Hey Grok" is a device-only model that Home Assistant does not list: it shows
+Grokbot and runs the second slot's pipeline. The `hey_grok` model is from
+[TaterTotterson/Tater-Wake-Words](https://github.com/TaterTotterson/Tater-Wake-Words) (MIT).
+
+- **BOOT** (the left top button) or a tap on the screen talks to the first slot
+  without a wake word; pressed while the assistant runs, it stops it, reply
+  included.
+- **Talk now** (a button in Home Assistant) does the same: use it to test the
+  microphone through speech-to-text and the reply without the wake word.
+- **Mute** (a switch in Home Assistant) silences the microphone and stops
+  listening until it is turned off.
+- **Volume** is the device's media player in Home Assistant.
 
 ## Secrets
 
@@ -34,8 +59,27 @@ esphome -s wake_cutoff 0.50 run box3-jarvis.yaml --device /dev/ttyACM0   # first
 esphome -s wake_cutoff 0.50 run box3-jarvis.yaml --device box3-jarvis.local   # later, OTA
 ```
 
-Then add the device in Home Assistant (Settings, Devices, ESPHome) and set its
-Assist pipeline to the Jarvis pipeline.
+Then add the device in Home Assistant (Settings, Devices, ESPHome) and set, on the
+device page:
+
+- Wake word: Hey Jarvis; Assistant: the Claude pipeline.
+- Wake word 2: Hey Mycroft; Assistant 2: the Codex pipeline.
+
+The "Local only" banner reads the first Assistant select, named by the
+`pipeline_select` substitution (`select.jarvis_box_3_assistant` by default). Check
+the entity ID on the device page and pass `-s pipeline_select <entity id>` if it
+differs.
+
+## Mascots
+
+`assets/make_mascots.py` draws the three mascots on a 32x32 grid in one palette
+whose colours are exact in RGB565, and writes `assets/<mascot>.gif` (8 frames:
+idle, listen, think, speak, two each), `assets/palette.gpl` and the preview sheet
+`assets/mascots.png`. After a change, regenerate them (needs Pillow):
+
+```
+python3 -I assets/make_mascots.py
+```
 
 ## Choosing the cutoff
 
@@ -44,7 +88,8 @@ flash each, in this order: 0.50, 0.60, 0.70, 0.80.
 
 For each candidate:
 
-Every wake logs `wake word detected: hey_jarvis`. Each phase below gets its own
+Every wake logs `wake word detected: <phrase>`, for example
+`wake word detected: Hey Jarvis`. Each phase below gets its own
 log file, so the true wakes never land in the false-wake count. Stop the logger
 with Ctrl-C when the phase ends.
 
@@ -54,7 +99,7 @@ with Ctrl-C when the phase ends.
 
    ```
    esphome logs box3-jarvis.yaml --device box3-jarvis.local | tee true-wakes.log
-   grep -c 'wake word detected' true-wakes.log
+   grep -c 'wake word detected: Hey Jarvis' true-wakes.log
    ```
 
 2. **False wakes.** Leave the device alone for 2 hours with a TV or room noise
@@ -62,7 +107,7 @@ with Ctrl-C when the phase ends.
 
    ```
    esphome logs box3-jarvis.yaml --device box3-jarvis.local | tee false-wakes.log
-   grep -c 'wake word detected' false-wakes.log
+   grep -c 'wake word detected: Hey Jarvis' false-wakes.log
    ```
 
 Record:

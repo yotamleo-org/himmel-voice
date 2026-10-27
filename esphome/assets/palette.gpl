@@ -1,0 +1,23 @@
+GIMP Palette
+Name: himmel-voice BOX-3 mascots (RGB565-exact)
+Columns: 4
+#
+ 16  20  32	background
+  8   8  16	outline
+248 252 248	white
+248 200  72	amber
+240 136 152	cheek
+120 200 248	sound
+240 164 120	clay light
+216 120  88	clay
+160  80  56	clay shade
+248 228 192	cream
+216 220 216	case light
+136 140 144	case shade
+ 24  44  40	screen
+ 80 224 136	terminal green
+120 124 136	slate light
+ 72  76  88	slate
+ 32  24  48	visor
+176 132 248	visor glow
+232  92 120	antenna tip
