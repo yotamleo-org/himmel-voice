@@ -316,15 +316,15 @@ def voice(ws, name, tts_voice):
     return 0
 
 
-def rest(ws, method, path, body=None):
-    """HA's REST config call (the one the UI editor uses); returns the status, 404 included."""
+def rest(ws, method, path, body=None, missing_ok=False):
+    """HA's REST config call (the one the UI editor uses); returns the status, a 404 too when missing_ok."""
     req = urllib.request.Request(ws.base + path, method=method, data=None if body is None else json.dumps(body).encode(),
                                  headers={"Authorization": f"Bearer {ws.token}", "Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             return resp.status
     except urllib.error.HTTPError as err:
-        if err.code == 404:
+        if missing_ok and err.code == 404:
             return 404
         raise RuntimeError(f"{method} {path}: HTTP {err.code}") from None
 
@@ -371,13 +371,20 @@ def cap_automations(cap, agents, sat, selects):
 def cap_setup(ws, cap, sat, selects, dry_run):
     normal = {s: find_pipeline(ws, name) for s, name in selects.items()}
     agents = sorted({p["conversation_engine"] for p in normal.values()})
-    local = {k: v for k, v in normal[sorted(normal)[0]].items() if k != "id"}
+    states = {s["entity_id"]: s["state"] for s in ws.call("get_states")}
+    unknown = sorted(e for e in (sat, *selects, *agents) if e not in states)
+    if unknown:  # a typo here would leave the cap silently ineffective
+        fail(f"unknown entities: {', '.join(unknown)}")
+    local ={k: v for k, v in normal[sorted(normal)[0]].items() if k != "id"}
     local.update(name=CAP_PIPELINE, conversation_engine=LOCAL_ENGINE, prefer_local_intents=True)
     existing = next((p for p in ws.call("assist_pipeline/pipeline/list")["pipelines"] if p["name"] == CAP_PIPELINE), None)
     counter = {"name": CAP_COUNTER, "initial": 0, "step": 1, "restore": True}
     have_counter = any(c["name"] == CAP_COUNTER for c in ws.call("counter/list"))
     usd = {"name": CAP_USD_INPUT, "min": 0, "max": 5, "step": 0.001, "mode": "box", "unit_of_measurement": "USD"}
     have_usd = any(i["name"] == CAP_USD_INPUT for i in ws.call("input_number/list"))
+    # a figure still at 0 (a failed earlier set_value) would keep the estimate at 0, so it is set again
+    figure = states.get(f"input_number.{CAP_USD_INPUT}", "0")
+    set_figure = not have_usd or not figure.replace(".", "", 1).isdigit() or float(figure) == 0
     dashboard = {"url_path": CAP_DASHBOARD, "title": "Voice cap", "icon": "mdi:cash-clock", "show_in_sidebar": True,
                  "require_admin": False}
     have_dashboard = any(d["url_path"] == CAP_DASHBOARD for d in ws.call("lovelace/dashboards/list"))
@@ -386,7 +393,7 @@ def cap_setup(ws, cap, sat, selects, dry_run):
     print(f"{verb} {'update' if existing else 'create'} pipeline {CAP_PIPELINE}: {json.dumps(local, sort_keys=True)}")
     print(f"{verb} {'keep' if have_counter else 'create'} counter: {json.dumps(counter)}")
     print(f"{verb} {'keep' if have_usd else 'create'} input_number: {json.dumps(usd)}"
-          f"{'' if have_usd else f' and set it to {USD_PER_REQUEST} once'}")
+          f"{f' and set it to {USD_PER_REQUEST}' if set_figure else ''}")
     print(f"{verb} {'keep' if have_dashboard else 'create'} dashboard: {json.dumps(dashboard)}")
     print(f"{verb} save dashboard {CAP_DASHBOARD} config: {json.dumps(card)}")
     automations = cap_automations(cap, agents, sat, selects)
@@ -402,6 +409,7 @@ def cap_setup(ws, cap, sat, selects, dry_run):
         ws.call("counter/create", **counter)
     if not have_usd:
         ws.call("input_number/create", **usd)
+    if set_figure:
         rest(ws, "POST", "/api/services/input_number/set_value",
              {"entity_id": f"input_number.{CAP_USD_INPUT}", "value": USD_PER_REQUEST})
     if not have_dashboard:
@@ -420,7 +428,7 @@ def cap_remove(ws, dry_run):
         if dry_run:
             print(f"would delete automation {auto_id}")
         else:
-            print(f"{'deleted' if rest(ws, 'DELETE', f'/api/config/automation/config/{auto_id}') != 404 else 'absent'} automation {auto_id}")
+            print(f"{'deleted' if rest(ws, 'DELETE', f'/api/config/automation/config/{auto_id}', missing_ok=True) != 404 else 'absent'} automation {auto_id}")
     for c in (c for c in ws.call("counter/list") if c["name"] == CAP_COUNTER):
         if not dry_run:
             ws.call("counter/delete", counter_id=c["id"])

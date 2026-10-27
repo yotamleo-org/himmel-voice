@@ -61,6 +61,8 @@ class StubHA:
         self.dashboards = []
         self.dashboard_configs = {}
         self.services = []
+        self.entities = []  # entity ids get_states reports besides the helpers
+        self.fail_services = False
         self.automations = {}
         self.calls = []
         self.server = socket.socket()
@@ -112,7 +114,10 @@ class StubHA:
         auto_id = path.rsplit("/", 1)[1]
         status = "200 OK"
         if path.startswith("/api/services/"):
-            self.services.append((path, json.loads(body)))
+            if self.fail_services:
+                status = "404 Not Found"
+            else:
+                self.services.append((path, json.loads(body)))
         elif method == "POST":
             self.automations[auto_id] = json.loads(body)
         elif self.automations.pop(auto_id, None) is None:
@@ -123,6 +128,10 @@ class StubHA:
         conn.close()
 
     def handle(self, msg):
+        if msg["type"] == "get_states":
+            figure = next((str(b["value"]) for p, b in reversed(self.services) if p.endswith("set_value")), "0.0")
+            return ([{"entity_id": e, "state": "idle"} for e in self.entities] +
+                    [{"entity_id": f"input_number.{i['name']}", "state": figure} for i in self.input_numbers])
         if msg["type"] == "counter/list":
             return [dict(c) for c in self.counters]
         if msg["type"] == "counter/create":
@@ -279,6 +288,8 @@ class CapTest(unittest.TestCase):
             {"id": "p1", "name": "Jarvis", "conversation_engine": "conversation.jarvis", **base},
             {"id": "p2", "name": "Nabu", "conversation_engine": "conversation.nabu", **base},
         ])
+        self.stub.entities = ["assist_satellite.example_assist_satellite", "select.example_assistant",
+                              "select.example_assistant_2", "conversation.jarvis", "conversation.nabu"]
         self.addCleanup(self.stub.server.close)
 
     def names(self):
@@ -338,6 +349,27 @@ class CapTest(unittest.TestCase):
         self.assertIn(">= 12.5", self.stub.automations["himmel_cap_switch"]["triggers"][0]["value_template"])
         self.assertIn("$12.50", self.stub.dashboard_configs["himmel-voice-cap"]["views"][0]["cards"][0]["content"])
         self.assertEqual(len(self.stub.services), 1)  # the per-request figure is set once, so an edit in HA survives a re-run
+
+    def test_unknown_entity_is_refused_before_any_write(self):
+        for flag in ("--dry-run", None):
+            args = [*self.SETUP[:-1], "select.example_typo=Nabu"] + ([flag] if flag else [])
+            r = run_assist(self.stub, *args)
+            self.assertEqual(r.returncode, 2, r.stdout)
+            self.assertIn("unknown entities: select.example_typo", r.stderr)
+        self.assertEqual((self.stub.automations, self.stub.counters, len(self.stub.pipelines)), ({}, [], 2))
+
+    def test_a_failed_write_stops_setup_and_a_rerun_sets_the_figure(self):
+        self.stub.fail_services = True
+        r = run_assist(self.stub, *self.SETUP)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("HTTP 404", r.stderr)
+        self.assertNotIn("done", r.stdout)
+        self.stub.fail_services = False
+        self.assertEqual(run_assist(self.stub, *self.SETUP).returncode, 0)
+        self.assertEqual(len(self.stub.services), 1)  # the figure was still 0 after the failure, so the rerun set it
+        self.assertEqual(len(self.stub.input_numbers), 1)
+        self.assertEqual(run_assist(self.stub, *self.SETUP).returncode, 0)
+        self.assertEqual(len(self.stub.services), 1)  # now it is set, an edit in HA survives
 
     def test_remove_deletes_everything_and_is_repeatable(self):
         self.assertEqual(run_assist(self.stub, *self.SETUP).returncode, 0)
