@@ -4,7 +4,7 @@
 
 - `litellm` (LiteLLM v1.106.4, `litellm-non_root`) holds the login in `data/auth/auth.json` and serves one model, `chatgpt/gpt-6.1-sol`. It is not a `*-codex` model because Home Assistant calls `/v1/chat/completions` and the `*-codex` models serve `/v1/responses` only. `config.yaml` caps it at 20 requests a minute, and the master key comes from `.env`.
 - `squid` is LiteLLM's only way out: CONNECT on 443 to `auth.openai.com` and `chatgpt.com`, nothing else (`squid.conf`). LiteLLM reaches it over an internal network through `HTTPS_PROXY`.
-- Both run non-root with a read-only rootfs, all capabilities dropped and no-new-privileges. The auth directory is the only writable mount. The admin UI is off, the cost map is the bundled one, and there is no database, so the master key is the only key.
+- Both run non-root with a read-only rootfs, all capabilities dropped and no-new-privileges. The auth directory is the only writable host mount; the rest is tmpfs (`/tmp` and `/app/.cache` for LiteLLM, `/tmp` and `/run` for squid). The admin UI is off, the cost map is the bundled one, and there is no database, so the master key is the only key.
 
 `docker-user-rule.sh` puts a `CODEX-USER` chain in `DOCKER-USER`. On the edge bridge (`br-codex-edge`, the published port 4000) only the Home Assistant host may open a connection, and only to 4000, and LiteLLM may open none. The squid bridge (`br-codex-out`) may open only tcp 443 and DNS. A connection to the station itself crosses `INPUT`, not `FORWARD`, so a `CODEX-INPUT` chain drops every connection the three codex bridges (edge, `br-codex-int`, out) open to the station, except squid's DNS. The station's own connections are not filtered, so the smoke test below runs on the station. Home Assistant reaches the proxy over plain HTTP, as it reaches Wyoming, so the master key and the conversation cross the LAN unencrypted. Keep the station and the Home Assistant host on a LAN you trust. The rule uses the same untracked `HA_HOST` file as the Wyoming rule. `codex-docker-user.service` applies it before `docker.service`, and `codex-docker-user.timer` re-applies it every minute in case a firewall flush wipes it. The rule covers IPv4 only, so both containers disable IPv6 through a sysctl. Do not enable IPv6 on these networks.
 
@@ -16,7 +16,7 @@ ChatGPT first: in the account's security settings, allow device-code login for C
 
 On the station, in `codex/`:
 
-    cp .env.example .env    # BIND_ADDR = the station's LAN address; LITELLM_MASTER_KEY = openssl rand -hex 32
+    install -m 600 .env.example .env    # BIND_ADDR = the station's LAN address; LITELLM_MASTER_KEY = openssl rand -hex 32
     sudo install -d -m 700 -o 65534 -g 65534 data/auth
     sudo install -m 600 -o 65534 -g 65534 /dev/null data/auth/auth.json
     sudo install -m 755 docker-user-rule.sh /usr/local/sbin/codex-docker-user-rule
@@ -34,10 +34,10 @@ Log in once (the proxy cannot run the device-code flow itself). The command prin
     sudo docker compose --env-file images.lock --env-file .env exec litellm python -c "from litellm.llms.chatgpt.authenticator import Authenticator; Authenticator().get_access_token()"
     sudo docker compose --env-file images.lock --env-file .env restart litellm
 
-Smoke test from the station (the key is read from `.env` and not printed):
+Smoke test from the station (the key is read from `.env` and reaches curl on stdin, never on a command line):
 
     key=$(sed -n 's/^LITELLM_MASTER_KEY=//p' .env); addr=$(sed -n 's/^BIND_ADDR=//p' .env)
-    curl -sS "http://$addr:4000/v1/chat/completions" -H "Authorization: Bearer $key" -H 'Content-Type: application/json' -d '{"model":"chatgpt/gpt-6.1-sol","messages":[{"role":"user","content":"Say ok."}]}'
+    printf 'Authorization: Bearer %s\n' "$key" | curl -sS "http://$addr:4000/v1/chat/completions" -H @- -H 'Content-Type: application/json' -d '{"model":"chatgpt/gpt-6.1-sol","messages":[{"role":"user","content":"Say ok."}]}'
     sudo docker compose --env-file images.lock --env-file .env logs squid | tail -3    # CONNECT chatgpt.com:443
 
 In Home Assistant:
