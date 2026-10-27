@@ -17,6 +17,41 @@ services:
     ports:
       - "${BIND_ADDR:-127.0.0.1}:10300:10300"
 
+  # GPU speech-to-text (HIMMEL-7834): `docker compose --profile gpu up -d whisper-gpu`, after
+  # stopping the CPU whisper (same port). Not started by a plain `up -d`.
+  whisper-gpu:
+    profiles: [gpu]
+    image: ${WHISPER_GPU_IMAGE:?set by images.lock}
+    restart: unless-stopped
+    # linuxserver images start as root under s6 and drop to PUID/PGID, so no `user:`;
+    # no-new-privileges is omitted too (it blocks that drop; operator-verify).
+    read_only: true
+    cap_drop: [ALL]
+    cap_add:
+      - CHOWN # s6 chowns /config to PUID/PGID
+      - DAC_OVERRIDE # s6 init scripts write files it does not own
+      - FOWNER # s6 chmods those files
+      - SETUID # privilege drop to PUID
+      - SETGID # privilege drop to PGID
+    tmpfs: [/tmp, /run]
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      WHISPER_MODEL: ${WHISPER_GPU_MODEL:-large-v3-turbo}
+      WHISPER_LANG: en
+      WHISPER_BEAM: "1"
+    volumes:
+      - ./data/whisper-gpu:/config
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:10300:10300"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
   piper:
     image: ${PIPER_IMAGE:?set by images.lock}
     restart: unless-stopped
