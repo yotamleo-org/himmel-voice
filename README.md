@@ -26,6 +26,23 @@ The ports bind to 127.0.0.1 unless `BIND_ADDR` is set; `.env` is untracked. The 
 
 `python3 -I roundtrip.py [host] ["sentence"] [runs] [stt_port]` speaks a sentence with Piper, transcribes it with Whisper and prints the timings.
 
+### GPU speech-to-text (HIMMEL-7834)
+
+The default `whisper` service runs on the CPU. The `gpu` profile adds `whisper-gpu` (linuxserver/faster-whisper `gpu`, `large-v3-turbo` float16 by default, `WHISPER_GPU_MODEL` to change it) on the same port 10300. It needs an NVIDIA driver and nvidia-container-toolkit on the host, and an amd64 card from Turing on. It starts as root under s6 and, read-only, runs the app as UID 911 (linuxserver ignores PUID/PGID then), so it has no `user:` and no `no-new-privileges`; see the PR's Security delta. A plain `docker compose up -d` is unchanged only before the switch: afterwards it would also start the CPU `whisper` on 10300 and conflict, so on a GPU deployment bring the service up only with the targeted `--profile gpu up -d whisper-gpu` below. Stop the CPU one first, since both bind 10300. From `wyoming/`:
+
+    mkdir -p data/whisper-gpu && sudo chown 911:911 data/whisper-gpu
+    sudo docker compose --env-file images.lock --env-file .env stop whisper
+    sudo docker compose --env-file images.lock --env-file .env --profile gpu up -d whisper-gpu
+    sudo docker compose --env-file images.lock --env-file .env logs whisper-gpu    # model loaded on cuda
+    nvidia-smi    # the whisper process is listed under the container
+
+Roll back to the CPU:
+
+    sudo docker compose --env-file images.lock --env-file .env --profile gpu stop whisper-gpu
+    sudo docker compose --env-file images.lock --env-file .env up -d whisper
+
+`wyoming/bench-stt.py` times faster-whisper directly. Install it into a virtualenv (`python3 -m venv .venv && .venv/bin/pip install faster-whisper`; the GPU also needs the CUDA 12 cuBLAS and cuDNN 9 libraries on the library path), then run `.venv/bin/python -I bench-stt.py large-v3-turbo cuda float16 clip.wav`.
+
 Docker's published ports bypass ufw, and the kernel forgets a hand-added `DOCKER-USER` rule on reboot. `docker-user-rule.sh` drops 10200 and 10300 from every address but the Home Assistant host, whether it dials the published port or routes straight to the container; traffic from the containers' own docker bridges is left alone. The rules live in a `WYOMING-USER` chain that `DOCKER-USER` jumps to. `wyoming-docker-user.service` applies it before `docker.service` starts, and docker requires it, so docker does not start if the rule cannot be applied. The host address lives in an untracked file outside the repo:
 
     sudo install -m 755 docker-user-rule.sh /usr/local/sbin/wyoming-docker-user-rule

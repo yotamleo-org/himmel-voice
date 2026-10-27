@@ -4,3 +4,5 @@
 WHISPER_IMAGE=docker.io/rhasspy/wyoming-whisper@sha256:ba6fcb6056ebe237d15a325381763a80af2fc8fcedaa04f6a714a7375eb20d80
 # rhasspy/wyoming-piper v2.5.2, released 2026-09-11
 PIPER_IMAGE=docker.io/rhasspy/wyoming-piper@sha256:7d39aafac409c2b6b09d999ed04d84c311d632e558b35baa60fad6aac722af7a
+# linuxserver/faster-whisper gpu (v3.8.1-ls73, amd64 only, wyoming-faster-whisper v3.8.1), pushed 2026-10-25
+WHISPER_GPU_IMAGE=docker.io/linuxserver/faster-whisper@sha256:dc273893de51dae79fb0af4bf4a2332bea274a376ce1b3374ead890e48c6dbdc
