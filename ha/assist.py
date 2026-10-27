@@ -247,6 +247,10 @@ def aliases(ws, path, dry_run):
     for e in refused:
         print(f"refused (deny list): {e}")
         del wanted[e]
+    stateless = sorted(e for e in wanted if e not in names)  # no friendly name to check against the deny list
+    for e in stateless:
+        print(f"unknown entity, skipped: {e}")
+        del wanted[e]
     current = registry()
     unknown = sorted(e for e in wanted if e not in current)
     for e in unknown:
@@ -265,7 +269,7 @@ def aliases(ws, path, dry_run):
         current = registry()
         todo = differing(current)
     print(f"missing: {len(todo)}")
-    return len(todo) + len(unknown) + len(refused)
+    return len(todo) + len(unknown) + len(stateless) + len(refused)
 
 
 def pipelines(ws):

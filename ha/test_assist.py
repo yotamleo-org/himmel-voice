@@ -202,6 +202,7 @@ class AliasesTest(unittest.TestCase):
             "fan.study_purifier": {"entity_id": "fan.study_purifier", "aliases": ["old name"]},
             "light.office": {"entity_id": "light.office", "aliases": ["lamp"]},
         })
+        self.stub.entities = ["fan.bedroom_purifier", "fan.study_purifier", "light.office", "lock.front_door", "fan.grow_tent"]
         self.addCleanup(self.stub.server.close)
         fd, self.path = tempfile.mkstemp(suffix=".txt")
         with os.fdopen(fd, "w") as f:
@@ -287,6 +288,15 @@ class AliasesTest(unittest.TestCase):
         self.assertEqual(self.stub.registry["fan.grow_tent"]["aliases"], [])
         self.assertEqual(self.stub.registry["fan.bedroom_purifier"]["aliases"],
                          ["air purifier", "purifier", "bedroom purifier"])
+
+    def test_an_entity_with_no_state_is_skipped_since_its_name_cannot_be_checked(self):
+        self.stub.registry["fan.disabled"] = {"entity_id": "fan.disabled", "aliases": []}
+        with open(self.path, "a") as f:
+            f.write("fan.disabled: ghost fan\n")
+        r = run_assist(self.stub, "aliases", self.path)
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("unknown entity, skipped: fan.disabled", r.stdout)
+        self.assertEqual(self.stub.registry["fan.disabled"]["aliases"], [])
 
     def test_a_failed_write_prints_no_set_line(self):
         self.stub.fail_update = True

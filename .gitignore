@@ -6,3 +6,5 @@ wyoming/data/
 # the entity ids your home exposes to Assist stay local
 ha/allowlist.txt
 ha/aliases.txt
+__pycache__/
+*.pyc
