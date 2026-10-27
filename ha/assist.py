@@ -15,7 +15,7 @@ Usage:
 `list` prints every entity, by domain, marking the ones the deny list refuses.
 `apply` turns "expose new entities" off for Assist, exposes exactly the allowlisted
 entities, unexposes every other one, then audits. A denied entity is never exposed,
-even when allowlisted. `aliases` sets each listed entity's Assist aliases (one
+even when allowlisted. `aliases` refuses a denied entity (the same deny list) and sets each other listed entity's Assist aliases (one
 `entity_id: name, name` per line) to exactly that list, then re-reads and counts what is
 still missing; `--dry-run` prints the change and writes nothing. `cap setup` caps the
 LLM voice agents at a daily USD estimate (HIMMEL-7780; HA reads no usage data, so spend is
@@ -242,23 +242,30 @@ def aliases(ws, path, dry_run):
         entries = ws.call("config/entity_registry/get_entries", entity_ids=sorted(wanted))
         return {e: (entry.get("aliases") or []) for e, entry in entries.items() if entry}
 
+    names = {s["entity_id"]: s.get("attributes", {}).get("friendly_name", "") for s in ws.call("get_states")}
+    refused = sorted(e for e in wanted if denied(e, names.get(e, "")))
+    for e in refused:
+        print(f"refused (deny list): {e}")
+        del wanted[e]
     current = registry()
     unknown = sorted(e for e in wanted if e not in current)
     for e in unknown:
         print(f"unknown entity, skipped: {e}")
     todo = differing(current)
-    for e in sorted(todo):
-        print(f"  {'would set' if dry_run else 'set'} {e}: {named(current[e])} -> {todo[e]}")
-    if not dry_run:
+    if dry_run:
+        for e in sorted(todo):
+            print(f"  would set {e}: {named(current[e])} -> {todo[e]}")
+    else:
         for e, n in sorted(todo.items()):
             # keep the own-name marker where it was (first): alias order sets the primary name
             marker = [None] if None in current[e] else []
             ws.call("config/entity_registry/update", entity_id=e,
                     aliases=marker + n if current[e][:1] == [None] else n + marker)
+            print(f"  set {e}: {named(current[e])} -> {n}")
         current = registry()
         todo = differing(current)
     print(f"missing: {len(todo)}")
-    return len(todo) + len(unknown)
+    return len(todo) + len(unknown) + len(refused)
 
 
 def pipelines(ws):
@@ -506,4 +513,5 @@ def main():
     sys.exit(1 if rc else 0)
 
 
-main()
+if __name__ == "__main__":
+    main()
