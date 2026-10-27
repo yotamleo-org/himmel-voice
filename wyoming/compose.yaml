@@ -23,20 +23,18 @@ services:
     profiles: [gpu]
     image: ${WHISPER_GPU_IMAGE:?set by images.lock}
     restart: unless-stopped
-    # linuxserver images start as root under s6 and drop to PUID/PGID, so no `user:`;
-    # no-new-privileges is omitted too (it blocks that drop; operator-verify).
+    # linuxserver images start as root under s6, so no `user:`; read-only they run the app as
+    # UID 911 (PUID/PGID have no effect). no-new-privileges is omitted too (operator-verify).
     read_only: true
     cap_drop: [ALL]
     cap_add:
-      - CHOWN # s6 chowns /config to PUID/PGID
+      - CHOWN # s6 chowns /config to the app user
       - DAC_OVERRIDE # s6 init scripts write files it does not own
       - FOWNER # s6 chmods those files
-      - SETUID # privilege drop to PUID
-      - SETGID # privilege drop to PGID
-    tmpfs: [/tmp, /run]
+      - SETUID # privilege drop to the app user
+      - SETGID # privilege drop to the app group
+    tmpfs: [/tmp, /run:exec] # s6 needs an executable /run
     environment:
-      PUID: "1000"
-      PGID: "1000"
       WHISPER_MODEL: ${WHISPER_GPU_MODEL:-large-v3-turbo}
       WHISPER_LANG: en
       WHISPER_BEAM: "1"
