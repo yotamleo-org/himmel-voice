@@ -1,0 +1,7 @@
+# model caches and voices downloaded at runtime
+wyoming/data/
+# deploy-time values (LAN addresses, keys) never enter this public repo
+.env
+*.env.local
+# the entity ids your home exposes to Assist stay local
+ha/allowlist.txt

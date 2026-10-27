@@ -1,2 +1,17 @@
 # himmel-voice
 Voice PA for the ESP32-S3-BOX-3 with Home Assistant: Wyoming, ESPHome and HA config as code. A himmel adapter (HIMMEL-7719).
+
+## wyoming/
+
+Speech-to-text (faster-whisper, `small-int8`, English) and text-to-speech (Piper) for Home Assistant's Wyoming integration. Images are pinned by digest in `images.lock`, the one pin site; containers run non-root with a read-only rootfs.
+
+    mkdir -p data/whisper data/piper
+    sudo docker compose --env-file images.lock up -d
+
+`python3 -I roundtrip.py [host] ["sentence"] [runs] [stt_port]` speaks a sentence with Piper, transcribes it with Whisper and prints the timings.
+
+Docker's published ports bypass ufw: limit 10200 and 10300 to the Home Assistant host with a `DOCKER-USER` rule.
+
+## ha/
+
+`assist.py` configures Home Assistant Assist over the websocket API: entity exposure (`audit`, `list`, `apply <allowlist>`), the voice pipelines (`pipelines`, `debug`, `voice`) and the satellite's wake words (`satellite`). `HA_URL` and `HA_TOKEN` come from the environment. Locks, alarm panels and grow-stack or heater entities are never exposed. Copy `allowlist.example.txt` to `allowlist.txt` (untracked).

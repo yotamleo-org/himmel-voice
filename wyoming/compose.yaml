@@ -1,0 +1,32 @@
+# Wyoming speech-to-text and text-to-speech for Home Assistant (HIMMEL-7731).
+# Images are pinned by digest in images.lock, the one pin site; a bump is its own PR.
+services:
+  whisper:
+    image: ${WHISPER_IMAGE:?set by images.lock}
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: [/tmp]
+    environment:
+      WYO_WHISPER_MODEL: ${WHISPER_MODEL:-small-int8}
+      WYO_WHISPER_LANGUAGE: en
+    volumes:
+      - ./data/whisper:/data
+    ports:
+      - "${BIND_ADDR:-0.0.0.0}:10300:10300"
+
+  piper:
+    image: ${PIPER_IMAGE:?set by images.lock}
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: [/tmp]
+    command: ["--voice", "en_US-lessac-medium"]
+    volumes:
+      - ./data/piper:/data
+    ports:
+      - "${BIND_ADDR:-0.0.0.0}:10200:10200"
