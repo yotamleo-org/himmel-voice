@@ -1,0 +1,15 @@
+[Unit]
+Description=Limit the Wyoming ports to the Home Assistant host (DOCKER-USER)
+After=network-pre.target nftables.service iptables.service firewalld.service
+Before=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=/etc/himmel-voice/docker-user.env
+ExecStart=/usr/local/sbin/wyoming-docker-user-rule
+# docker.service requires this unit, so a restart here would stop docker: apply a new HA_HOST with reload.
+ExecReload=/usr/local/sbin/wyoming-docker-user-rule
+
+[Install]
+RequiredBy=docker.service
