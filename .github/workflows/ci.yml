@@ -42,14 +42,17 @@ jobs:
           bash "$RUNNER_TEMP/leak-classes.sh" --tree
 
       - name: ruff
-        run: pipx run ruff==0.14.0 check wyoming ha
+        run: pipx run ruff==0.14.0 check wyoming ha gateway
 
       - name: smoke
         run: |
-          python3 -I -m py_compile wyoming/roundtrip.py ha/assist.py
+          python3 -I -m py_compile wyoming/roundtrip.py ha/assist.py gateway/gateway.py
           rc=0; python3 -I ha/assist.py 2>"$RUNNER_TEMP/usage.txt" || rc=$?
           test "$rc" = 2
           grep -q '^Usage:' "$RUNNER_TEMP/usage.txt"
 
       - name: assist tests
         run: python3 -I ha/test_assist.py
+
+      - name: gateway tests
+        run: python3 -I gateway/test_gateway.py

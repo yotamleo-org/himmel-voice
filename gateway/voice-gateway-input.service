@@ -1,0 +1,14 @@
+[Unit]
+Description=Limit the voice-gateway port to the Home Assistant host (INPUT)
+After=network-pre.target nftables.service iptables.service firewalld.service ufw.service
+Before=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=/etc/himmel-voice/docker-user.env
+ExecStart=/usr/local/sbin/voice-gateway-input-rule
+ExecReload=/usr/local/sbin/voice-gateway-input-rule
+
+[Install]
+WantedBy=multi-user.target
