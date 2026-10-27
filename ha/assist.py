@@ -5,6 +5,8 @@ Usage:
   python3 -I assist.py list
   python3 -I assist.py apply <allowlist file>
   python3 -I assist.py aliases <aliases file> [--dry-run]
+  python3 -I assist.py cap setup <daily cap in USD> <satellite entity> <pipeline select entity>=<pipeline name>... [--dry-run]
+  python3 -I assist.py cap remove [--dry-run]
   python3 -I assist.py pipelines
   python3 -I assist.py satellite
   python3 -I assist.py debug <pipeline name>
@@ -15,7 +17,15 @@ Usage:
 entities, unexposes every other one, then audits. A denied entity is never exposed,
 even when allowlisted. `aliases` sets each listed entity's Assist aliases (one
 `entity_id: name, name` per line) to exactly that list, then re-reads and counts what is
-still missing; `--dry-run` prints the change and writes nothing. `pipelines` prints each assistant's engines and voice, `debug`
+still missing; `--dry-run` prints the change and writes nothing. `cap setup` caps the
+LLM voice agents at a daily USD estimate (HIMMEL-7780; HA reads no usage data, so spend is
+the call counter times an editable USD-per-request input_number): a counter, that
+input_number, a local-only pipeline, a dashboard card, and three
+automations (ids himmel_cap_*, overwritten in place on a re-run) that count each call to
+the named pipelines' conversation agents, once the estimate reaches the cap switch every named pipeline select
+(the BOX-3 has one per wake word) to the local-only pipeline with a spoken notice, and at
+midnight reset and select each one's pipeline again. The automations go through HA's REST config endpoint (the
+UI editor's call); `cap remove` deletes all of it. `pipelines` prints each assistant's engines and voice, `debug`
 the events of a pipeline's latest run, `voice` sets a pipeline's text-to-speech voice.
 
 HA_URL (http://host:8123) and HA_TOKEN come from the environment, never from argv,
@@ -30,9 +40,19 @@ import socket
 import ssl
 import struct
 import sys
+import urllib.error
+import urllib.request
 from urllib.parse import urlparse
 
 ASSISTANT = "conversation"
+CAP_COUNTER = "himmel_cap"
+CAP_PIPELINE = "himmel-cap-local"
+CAP_USD_INPUT = "himmel_cap_usd_per_request"
+CAP_DASHBOARD = "himmel-voice-cap"
+USD_PER_REQUEST = 0.03
+CAP_AUTOMATIONS = ("himmel_cap_count", "himmel_cap_switch", "himmel_cap_reset")
+CAP_NOTICE = "Daily AI limit reached. Local commands only until midnight."
+LOCAL_ENGINE = "conversation.home_assistant"
 DENY_DOMAINS = ("lock", "alarm_control_panel")
 DENY_WORDS = re.compile(r"grow|tent|ggs|bluelab|guardian|bucket|heater|heizung|heizlüfter|towel.?warmer", re.IGNORECASE)
 
@@ -125,6 +145,7 @@ def connect():
     if not url or not token:
         fail("set HA_URL and HA_TOKEN in the environment")
     ws = WS(url)
+    ws.base, ws.token = url.rstrip("/"), token
     if ws.recv().get("type") != "auth_required":
         fail("unexpected greeting")
     ws.send({"type": "auth", "access_token": token})
@@ -295,6 +316,151 @@ def voice(ws, name, tts_voice):
     return 0
 
 
+def rest(ws, method, path, body=None, missing_ok=False):
+    """HA's REST config call (the one the UI editor uses); returns the status, a 404 too when missing_ok."""
+    req = urllib.request.Request(ws.base + path, method=method, data=None if body is None else json.dumps(body).encode(),
+                                 headers={"Authorization": f"Bearer {ws.token}", "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return resp.status
+    except urllib.error.HTTPError as err:
+        # HA answers a DELETE of an absent automation with 400 "Resource not found"; other 400s stay errors
+        if missing_ok and (err.code == 404 or (err.code == 400 and b"Resource not found" in err.read())):
+            return 404
+        raise RuntimeError(f"{method} {path}: HTTP {err.code}") from None
+
+
+def cap_spend_template():
+    return f"states('counter.{CAP_COUNTER}') | float(0) * states('input_number.{CAP_USD_INPUT}') | float(0)"
+
+
+def cap_card(cap, selects):
+    # no usage data is reachable from HA, so spend is the request count times a configurable USD figure
+    content = (
+        "Requests today: **{{ states('counter.@C@') | int(0) }}**\n\n"
+        "Estimated spend: **${{ (@SPEND@) | round(2) }}** of $@CAP@ "
+        "(at ${{ states('input_number.@U@') }} per request)\n\n"
+        "Capped: **{{ 'yes' if @SELECTS@ | select('is_state', '@P@') | list | length > 0 else 'no' }}**\n\n"
+        "Resets: **{{ (now().replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)).strftime('%a %H:%M') }}**")
+    for key, value in (("@C@", CAP_COUNTER), ("@SPEND@", cap_spend_template()), ("@CAP@", f"{cap:.2f}"),
+                       ("@U@", CAP_USD_INPUT), ("@SELECTS@", json.dumps(sorted(selects))), ("@P@", CAP_PIPELINE)):
+        content = content.replace(key, value)
+    return {"views": [{"title": "Voice cap", "cards": [{"type": "markdown", "title": "Voice agent daily cap", "content": content}]}]}
+
+
+def cap_automations(cap, agents, sat, selects):
+    counter = f"counter.{CAP_COUNTER}"
+    return {
+        "himmel_cap_count": {
+            "alias": "Voice cap: count agent calls", "mode": "queued", "conditions": [],
+            "triggers": [{"trigger": "state", "entity_id": agents}],
+            "actions": [{"action": "counter.increment", "target": {"entity_id": counter}}]},
+        "himmel_cap_switch": {
+            "alias": "Voice cap: switch to local-only", "mode": "single", "conditions": [],
+            "triggers": [{"trigger": "template", "value_template": f"{{{{ {cap_spend_template()} >= {cap:g} }}}}"}],
+            "actions": [{"action": "select.select_option", "target": {"entity_id": sorted(selects)}, "data": {"option": CAP_PIPELINE}},
+                        {"action": "assist_satellite.announce", "target": {"entity_id": sat}, "data": {"message": CAP_NOTICE}}]},
+        "himmel_cap_reset": {
+            "alias": "Voice cap: midnight reset", "mode": "single", "conditions": [],
+            "triggers": [{"trigger": "time", "at": "00:00:00"}],
+            "actions": [{"action": "counter.reset", "target": {"entity_id": counter}}] +
+                       [{"action": "select.select_option", "target": {"entity_id": s}, "data": {"option": name}}
+                        for s, name in sorted(selects.items())]},
+    }
+
+
+def cap_setup(ws, cap, sat, selects, dry_run):
+    normal = {s: find_pipeline(ws, name) for s, name in selects.items()}
+    agents = sorted({p["conversation_engine"] for p in normal.values()})
+    states = {s["entity_id"]: s["state"] for s in ws.call("get_states")}
+    unknown = sorted(e for e in (sat, *selects, *agents) if e not in states)
+    if unknown:  # a typo here would leave the cap silently ineffective
+        fail(f"unknown entities: {', '.join(unknown)}")
+    local ={k: v for k, v in normal[sorted(normal)[0]].items() if k != "id"}
+    local.update(name=CAP_PIPELINE, conversation_engine=LOCAL_ENGINE, prefer_local_intents=True)
+    existing = next((p for p in ws.call("assist_pipeline/pipeline/list")["pipelines"] if p["name"] == CAP_PIPELINE), None)
+    counter = {"name": CAP_COUNTER, "initial": 0, "step": 1, "restore": True}
+    have_counter = any(c["name"] == CAP_COUNTER for c in ws.call("counter/list"))
+    usd = {"name": CAP_USD_INPUT, "min": 0, "max": 5, "step": 0.001, "mode": "box", "unit_of_measurement": "USD"}
+    have_usd = any(i["name"] == CAP_USD_INPUT for i in ws.call("input_number/list"))
+    # a figure still at 0 (a failed earlier set_value) would keep the estimate at 0, so it is set again
+    figure = states.get(f"input_number.{CAP_USD_INPUT}", "0")
+    set_figure = not have_usd or not figure.replace(".", "", 1).isdigit() or float(figure) == 0
+    dashboard = {"url_path": CAP_DASHBOARD, "title": "Voice cap", "icon": "mdi:cash-clock", "show_in_sidebar": True,
+                 "require_admin": False}
+    have_dashboard = any(d["url_path"] == CAP_DASHBOARD for d in ws.call("lovelace/dashboards/list"))
+    card = cap_card(cap, selects)
+    verb = "would" if dry_run else "will"
+    print(f"{verb} {'update' if existing else 'create'} pipeline {CAP_PIPELINE}: {json.dumps(local, sort_keys=True)}")
+    print(f"{verb} {'keep' if have_counter else 'create'} counter: {json.dumps(counter)}")
+    print(f"{verb} {'keep' if have_usd else 'create'} input_number: {json.dumps(usd)}"
+          f"{f' and set it to {USD_PER_REQUEST}' if set_figure else ''}")
+    print(f"{verb} {'keep' if have_dashboard else 'create'} dashboard: {json.dumps(dashboard)}")
+    print(f"{verb} save dashboard {CAP_DASHBOARD} config: {json.dumps(card)}")
+    automations = cap_automations(cap, agents, sat, selects)
+    for auto_id, payload in automations.items():
+        print(f"{verb} set automation {auto_id}: {json.dumps(payload, sort_keys=True)}")
+    if dry_run:
+        return 0
+    if existing:
+        ws.call("assist_pipeline/pipeline/update", pipeline_id=existing["id"], **local)
+    else:
+        ws.call("assist_pipeline/pipeline/create", **local)
+    if not have_counter:
+        ws.call("counter/create", **counter)
+    if not have_usd:
+        ws.call("input_number/create", **usd)
+    if set_figure:
+        rest(ws, "POST", "/api/services/input_number/set_value",
+             {"entity_id": f"input_number.{CAP_USD_INPUT}", "value": USD_PER_REQUEST})
+    if not have_dashboard:
+        ws.call("lovelace/dashboards/create", **dashboard)
+    ws.call("lovelace/config/save", url_path=CAP_DASHBOARD, config=card)
+    for auto_id, payload in automations.items():
+        rest(ws, "POST", f"/api/config/automation/config/{auto_id}", payload)
+        print(f"set automation {auto_id}")
+    print("done; confirm in Developer tools that one voice request changes each agent entity's state once")
+    return 0
+
+
+def cap_remove(ws, dry_run):
+    verb = "would delete" if dry_run else "deleted"
+    for auto_id in CAP_AUTOMATIONS:
+        if dry_run:
+            print(f"would delete automation {auto_id}")
+        else:
+            print(f"{'deleted' if rest(ws, 'DELETE', f'/api/config/automation/config/{auto_id}', missing_ok=True) != 404 else 'absent'} automation {auto_id}")
+    for c in (c for c in ws.call("counter/list") if c["name"] == CAP_COUNTER):
+        if not dry_run:
+            ws.call("counter/delete", counter_id=c["id"])
+        print(f"{verb} counter {CAP_COUNTER}")
+    for i in (i for i in ws.call("input_number/list") if i["name"] == CAP_USD_INPUT):
+        if not dry_run:
+            ws.call("input_number/delete", input_number_id=i["id"])
+        print(f"{verb} input_number {CAP_USD_INPUT}")
+    for d in (d for d in ws.call("lovelace/dashboards/list") if d["url_path"] == CAP_DASHBOARD):
+        if not dry_run:
+            ws.call("lovelace/dashboards/delete", dashboard_id=d["id"])
+        print(f"{verb} dashboard {CAP_DASHBOARD}")
+    for p in (p for p in ws.call("assist_pipeline/pipeline/list")["pipelines"] if p["name"] == CAP_PIPELINE):
+        if not dry_run:
+            ws.call("assist_pipeline/pipeline/delete", pipeline_id=p["id"])
+        print(f"{verb} pipeline {CAP_PIPELINE}")
+    return 0
+
+
+def cap_command(args):
+    dry_run = "--dry-run" in args
+    args = [a for a in args if a != "--dry-run"]
+    pairs = [a.partition("=") for a in args[3:]]
+    if (len(args) >= 4 and args[0] == "setup" and re.fullmatch(r"\d+(\.\d+)?", args[1]) and float(args[1]) > 0
+            and all(s and eq and name for s, eq, name in pairs)):
+        return lambda ws: cap_setup(ws, float(args[1]), args[2], {s: name for s, _, name in pairs}, dry_run)
+    if args == ["remove"]:
+        return lambda ws: cap_remove(ws, dry_run)
+    return None
+
+
 def satellite(ws):
     states = ws.call("get_states")
     for sat in (s["entity_id"] for s in states if s["entity_id"].startswith("assist_satellite.")):
@@ -320,6 +486,8 @@ def main():
         cmd = lambda ws: apply(ws, sys.argv[2])
     elif len(sys.argv) in (3, 4) and sys.argv[1] == "aliases" and sys.argv[3:] in ([], ["--dry-run"]):
         cmd = lambda ws: aliases(ws, sys.argv[2], len(sys.argv) == 4)
+    elif sys.argv[1:2] == ["cap"] and cap_command(sys.argv[2:]):
+        cmd = cap_command(sys.argv[2:])
     elif len(sys.argv) == 2 and sys.argv[1] == "pipelines":
         cmd = lambda ws: pipelines(ws)
     elif len(sys.argv) == 2 and sys.argv[1] == "satellite":
