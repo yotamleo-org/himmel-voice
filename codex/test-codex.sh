@@ -73,7 +73,7 @@ else bad "squid allowlist"; fi
 
 # Rows 5-7 run the rule script in a private namespace.
 rule=$here/docker-user-rule.sh
-if ! unshare -rnm true 2>/dev/null; then echo "skip rows 5-7: no unshare -rnm"; exit "$fail"; fi
+if ! unshare -rnm true 2>/dev/null; then echo "FAIL rows 5-7 not run: no unshare -rnm"; exit 1; fi
 ns() { unshare -rnm bash -c "export XTABLES_LOCKFILE=\$(mktemp); $1" _ "$rule"; }
 
 # Row 5: ingress to the edge bridge is HA_HOST to port 4000 only; anything the edge bridge
