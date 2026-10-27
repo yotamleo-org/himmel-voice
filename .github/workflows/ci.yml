@@ -55,4 +55,6 @@ jobs:
         run: python3 -I ha/test_assist.py
 
       - name: wyoming rule tests
-        run: bash wyoming/test-docker-user-rule.sh
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          bash wyoming/test-docker-user-rule.sh

@@ -21,7 +21,10 @@ else ok "every iptables call has -w"; fi
     ok "refresh timer re-runs the rule script under flock" || bad "no refresh timer re-running the rule script"
 
 # Row 3: after a flush the chain is empty; one re-run (what the timer does) restores both DROPs.
-if ! unshare -rnm true 2>/dev/null; then echo "skip rows 3: no unshare -rnm"; exit "$fail"; fi
+if ! unshare -rnm true 2>/dev/null; then
+    if [ -n "${CI:-}" ]; then bad "row 3 needs unshare -rnm and cannot run here"; else echo "skip row 3: no unshare -rnm"; fi
+    exit "$fail"
+fi
 HA_HOST=192.0.2.5 unshare -rnm bash -c '
     s=$1; lockfile=$(mktemp) || exit 2; trap '"'"'rm -f "$lockfile"'"'"' EXIT; export XTABLES_LOCKFILE=$lockfile
     drops() { iptables -w -S WYOMING-USER | grep -c -e " -j DROP"; }
