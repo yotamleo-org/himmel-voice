@@ -1,6 +1,6 @@
 """Tests for assist.py against a stub Home Assistant websocket (HIMMEL-7779).
 
-Run: python3 -I test_assist.py
+Run: python3 -I ha/test_assist.py
 """
 import base64
 import hashlib
@@ -89,8 +89,10 @@ class StubHA:
             conn.close()
 
     def handle(self, msg):
-        if msg["type"] == "config/entity_registry/list":
-            return [dict(e) for e in self.registry.values()]
+        if msg["type"] == "config/entity_registry/list":  # partial entries: no aliases, as in HA
+            return [{"entity_id": e} for e in self.registry]
+        if msg["type"] == "config/entity_registry/get_entries":
+            return {e: dict(self.registry[e]) if e in self.registry else None for e in msg["entity_ids"]}
         if msg["type"] == "config/entity_registry/update":
             self.registry[msg["entity_id"]]["aliases"] = msg["aliases"]
             return {"entity_entry": self.registry[msg["entity_id"]]}
@@ -136,6 +138,14 @@ class AliasesTest(unittest.TestCase):
         self.assertEqual(self.stub.registry["light.office"]["aliases"], ["lamp"])
         again = run_assist(self.stub, "aliases", self.path, "--dry-run")
         self.assertIn("missing: 0", again.stdout)
+
+    def test_line_without_colon_is_refused_and_writes_nothing(self):
+        with open(self.path, "w") as f:
+            f.write("fan.bedroom_purifier air purifier\n")
+        r = run_assist(self.stub, "aliases", self.path)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("no colon", r.stderr)
+        self.assertNotIn("config/entity_registry/update", self.stub.calls)
 
     def test_clean_file_is_exit_zero_after_apply(self):
         with open(self.path, "w") as f:

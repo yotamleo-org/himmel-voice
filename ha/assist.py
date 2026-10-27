@@ -200,11 +200,15 @@ def aliases(ws, path, dry_run):
         for line in f:
             line = line.split("#", 1)[0].strip()
             if line:
-                entity, _, names = line.partition(":")
+                entity, colon, names = line.partition(":")
+                if not colon:
+                    raise ValueError(f"aliases file: no colon in line {line!r}")
                 wanted[entity.strip()] = [n.strip() for n in names.split(",") if n.strip()]
 
     def registry():
-        return {e["entity_id"]: e.get("aliases") or [] for e in ws.call("config/entity_registry/list")}
+        # the registry list call omits aliases; only full entries carry them
+        entries = ws.call("config/entity_registry/get_entries", entity_ids=sorted(wanted))
+        return {e: (entry.get("aliases") or []) for e, entry in entries.items() if entry}
 
     current = registry()
     unknown = sorted(e for e in wanted if e not in current)
