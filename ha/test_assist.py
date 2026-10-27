@@ -63,6 +63,7 @@ class StubHA:
         self.services = []
         self.entities = []  # entity ids get_states reports besides the helpers
         self.fail_services = False
+        self.fail_update = False  # the registry refuses a write
         self.absent_status = "404 Not Found"  # HA answers a DELETE of an absent automation with 400 "Resource not found"
         self.automations = {}
         self.calls = []
@@ -98,6 +99,9 @@ class StubHA:
             while True:
                 msg = read_frame(conn)
                 self.calls.append(msg["type"])
+                if self.fail_update and msg["type"] == "config/entity_registry/update":
+                    send_frame(conn, {"id": msg["id"], "type": "result", "success": False, "error": {"code": "refused"}})
+                    continue
                 send_frame(conn, {"id": msg["id"], "type": "result", "success": True, "result": self.handle(msg)})
         except (ConnectionError, OSError):
             conn.close()
@@ -198,6 +202,7 @@ class AliasesTest(unittest.TestCase):
             "fan.study_purifier": {"entity_id": "fan.study_purifier", "aliases": ["old name"]},
             "light.office": {"entity_id": "light.office", "aliases": ["lamp"]},
         })
+        self.stub.entities = ["fan.bedroom_purifier", "fan.study_purifier", "light.office", "lock.front_door", "fan.grow_tent"]
         self.addCleanup(self.stub.server.close)
         fd, self.path = tempfile.mkstemp(suffix=".txt")
         with os.fdopen(fd, "w") as f:
@@ -270,12 +275,48 @@ class AliasesTest(unittest.TestCase):
         self.assertIn("duplicate entity", r.stderr)
         self.assertNotIn("config/entity_registry/update", self.stub.calls)
 
+    def test_a_denied_entity_takes_no_alias(self):
+        self.stub.registry["lock.front_door"] = {"entity_id": "lock.front_door", "aliases": []}
+        self.stub.registry["fan.grow_tent"] = {"entity_id": "fan.grow_tent", "aliases": []}
+        with open(self.path, "a") as f:
+            f.write("lock.front_door: door\nfan.grow_tent: tent fan\n")
+        r = run_assist(self.stub, "aliases", self.path)
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("refused (deny list): lock.front_door", r.stdout)
+        self.assertIn("refused (deny list): fan.grow_tent", r.stdout)
+        self.assertEqual(self.stub.registry["lock.front_door"]["aliases"], [])
+        self.assertEqual(self.stub.registry["fan.grow_tent"]["aliases"], [])
+        self.assertEqual(self.stub.registry["fan.bedroom_purifier"]["aliases"],
+                         ["air purifier", "purifier", "bedroom purifier"])
+
+    def test_an_entity_with_no_state_is_skipped_since_its_name_cannot_be_checked(self):
+        self.stub.registry["fan.disabled"] = {"entity_id": "fan.disabled", "aliases": []}
+        with open(self.path, "a") as f:
+            f.write("fan.disabled: ghost fan\n")
+        r = run_assist(self.stub, "aliases", self.path)
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("unknown entity, skipped: fan.disabled", r.stdout)
+        self.assertEqual(self.stub.registry["fan.disabled"]["aliases"], [])
+
+    def test_a_failed_write_prints_no_set_line(self):
+        self.stub.fail_update = True
+        r = run_assist(self.stub, "aliases", self.path)
+        self.assertEqual(r.returncode, 2)
+        self.assertNotIn("  set ", r.stdout)
+
     def test_clean_file_is_exit_zero_after_apply(self):
         with open(self.path, "w") as f:
             f.write("fan.bedroom_purifier: air purifier\n")
         self.assertEqual(run_assist(self.stub, "aliases", self.path, "--dry-run").returncode, 1)
         self.assertEqual(run_assist(self.stub, "aliases", self.path).returncode, 0)
         self.assertEqual(run_assist(self.stub, "aliases", self.path, "--dry-run").returncode, 0)
+
+
+class ImportTest(unittest.TestCase):
+    def test_importing_assist_does_not_run_main(self):
+        code = f"import sys; sys.path.insert(0, {HERE!r}); import assist; print(callable(assist.main))"
+        r = subprocess.run([sys.executable, "-B", "-I", "-c", code], capture_output=True, text=True, timeout=30)
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, "True"), r.stderr)
 
 
 class CapTest(unittest.TestCase):
