@@ -4,6 +4,7 @@ Usage:
   python3 -I assist.py audit
   python3 -I assist.py list
   python3 -I assist.py apply <allowlist file>
+  python3 -I assist.py aliases <aliases file> [--dry-run]
   python3 -I assist.py pipelines
   python3 -I assist.py satellite
   python3 -I assist.py debug <pipeline name>
@@ -12,7 +13,9 @@ Usage:
 `list` prints every entity, by domain, marking the ones the deny list refuses.
 `apply` turns "expose new entities" off for Assist, exposes exactly the allowlisted
 entities, unexposes every other one, then audits. A denied entity is never exposed,
-even when allowlisted. `pipelines` prints each assistant's engines and voice, `debug`
+even when allowlisted. `aliases` sets each listed entity's Assist aliases (one
+`entity_id: name, name` per line) to exactly that list, then re-reads and counts what is
+still missing; `--dry-run` prints the change and writes nothing. `pipelines` prints each assistant's engines and voice, `debug`
 the events of a pipeline's latest run, `voice` sets a pipeline's text-to-speech voice.
 
 HA_URL (http://host:8123) and HA_TOKEN come from the environment, never from argv,
@@ -191,6 +194,34 @@ def apply(ws, path):
     return audit(ws) + len(refused)
 
 
+def aliases(ws, path, dry_run):
+    wanted = {}
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.split("#", 1)[0].strip()
+            if line:
+                entity, _, names = line.partition(":")
+                wanted[entity.strip()] = [n.strip() for n in names.split(",") if n.strip()]
+
+    def registry():
+        return {e["entity_id"]: e.get("aliases") or [] for e in ws.call("config/entity_registry/list")}
+
+    current = registry()
+    unknown = sorted(e for e in wanted if e not in current)
+    for e in unknown:
+        print(f"unknown entity, skipped: {e}")
+    todo = {e: n for e, n in wanted.items() if e in current and current[e] != n}
+    for e in sorted(todo):
+        print(f"  {'would set' if dry_run else 'set'} {e}: {current[e]} -> {todo[e]}")
+    if not dry_run:
+        for e, n in sorted(todo.items()):
+            ws.call("config/entity_registry/update", entity_id=e, aliases=n)
+        current = registry()
+        todo = {e: n for e, n in wanted.items() if e in current and current[e] != n}
+    print(f"missing: {len(todo)}")
+    return len(todo) + len(unknown)
+
+
 def pipelines(ws):
     res = ws.call("assist_pipeline/pipeline/list")
     for p in res["pipelines"]:
@@ -269,6 +300,8 @@ def main():
         cmd = lambda ws: list_entities(ws)
     elif len(sys.argv) == 3 and sys.argv[1] == "apply":
         cmd = lambda ws: apply(ws, sys.argv[2])
+    elif len(sys.argv) in (3, 4) and sys.argv[1] == "aliases" and sys.argv[3:] in ([], ["--dry-run"]):
+        cmd = lambda ws: aliases(ws, sys.argv[2], len(sys.argv) == 4)
     elif len(sys.argv) == 2 and sys.argv[1] == "pipelines":
         cmd = lambda ws: pipelines(ws)
     elif len(sys.argv) == 2 and sys.argv[1] == "satellite":
