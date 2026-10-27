@@ -1,0 +1,14 @@
+[Unit]
+Description=Limit the Wyoming ports to the Home Assistant host (DOCKER-USER)
+After=docker.service
+Requires=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=/etc/himmel-voice/docker-user.env
+ExecStart=/usr/local/sbin/wyoming-docker-user-rule
+
+[Install]
+WantedBy=multi-user.target

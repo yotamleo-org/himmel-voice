@@ -23,7 +23,15 @@ The ports bind to 127.0.0.1 unless `BIND_ADDR` is set; `.env` is untracked. The 
 
 `python3 -I roundtrip.py [host] ["sentence"] [runs] [stt_port]` speaks a sentence with Piper, transcribes it with Whisper and prints the timings.
 
-Docker's published ports bypass ufw: limit 10200 and 10300 to the Home Assistant host with a `DOCKER-USER` rule.
+Docker's published ports bypass ufw, and the kernel forgets a hand-added `DOCKER-USER` rule on reboot. `docker-user-rule.sh` drops 10200 and 10300 from every address but the Home Assistant host, and `wyoming-docker-user.service` re-applies it after `docker.service` starts (and whenever docker restarts). The host address lives in an untracked file outside the repo:
+
+    sudo install -m 755 docker-user-rule.sh /usr/local/sbin/wyoming-docker-user-rule
+    sudo install -m 644 wyoming-docker-user.service /etc/systemd/system/
+    sudo mkdir -p /etc/himmel-voice
+    echo 'HA_HOST=192.0.2.5' | sudo tee /etc/himmel-voice/docker-user.env    # the Home Assistant host's address
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now wyoming-docker-user.service
+    sudo iptables -S DOCKER-USER    # two DROP rules, one per port
 
 ## ha/
 
