@@ -159,6 +159,16 @@ class AliasesTest(unittest.TestCase):
         self.assertEqual(run_assist(self.stub, "aliases", self.path).returncode, 0)
         self.assertNotIn("config/entity_registry/update", self.stub.calls)
 
+    def test_the_entity_own_name_marker_is_kept_and_is_not_an_alias(self):
+        self.stub.registry["fan.bedroom_purifier"]["aliases"] = [None]
+        with open(self.path, "w") as f:
+            f.write("fan.bedroom_purifier: air purifier\n")
+        self.assertEqual(run_assist(self.stub, "aliases", self.path).returncode, 0)
+        self.assertEqual(self.stub.registry["fan.bedroom_purifier"]["aliases"], ["air purifier", None])
+        self.stub.calls.clear()
+        self.assertEqual(run_assist(self.stub, "aliases", self.path).returncode, 0)
+        self.assertNotIn("config/entity_registry/update", self.stub.calls)
+
     def test_duplicate_entity_is_refused_and_writes_nothing(self):
         with open(self.path, "w") as f:
             f.write("fan.bedroom_purifier: air purifier\nfan.bedroom_purifier: purifier\n")

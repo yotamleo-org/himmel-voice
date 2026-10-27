@@ -208,9 +208,13 @@ def aliases(ws, path, dry_run):
                     raise ValueError(f"aliases file: duplicate entity {entity!r}")
                 wanted[entity] = list(dict.fromkeys(n.strip() for n in names.split(",") if n.strip()))
 
+    def named(aliases):
+        # None in HA's list means "also answer to the entity's own name": not a spoken alias
+        return [a for a in aliases if a is not None]
+
     def differing(current):
         # HA may return aliases in set order, so compare as sets
-        return {e: n for e, n in wanted.items() if e in current and set(current[e]) != set(n)}
+        return {e: n for e, n in wanted.items() if e in current and set(named(current[e])) != set(n)}
 
     def registry():
         # the registry list call omits aliases; only full entries carry them
@@ -223,10 +227,10 @@ def aliases(ws, path, dry_run):
         print(f"unknown entity, skipped: {e}")
     todo = differing(current)
     for e in sorted(todo):
-        print(f"  {'would set' if dry_run else 'set'} {e}: {current[e]} -> {todo[e]}")
+        print(f"  {'would set' if dry_run else 'set'} {e}: {named(current[e])} -> {todo[e]}")
     if not dry_run:
         for e, n in sorted(todo.items()):
-            ws.call("config/entity_registry/update", entity_id=e, aliases=n)
+            ws.call("config/entity_registry/update", entity_id=e, aliases=n + ([None] if None in current[e] else []))
         current = registry()
         todo = differing(current)
     print(f"missing: {len(todo)}")
