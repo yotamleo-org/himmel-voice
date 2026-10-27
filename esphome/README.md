@@ -44,11 +44,19 @@ flash each, in this order: 0.50, 0.60, 0.70, 0.80.
 
 For each candidate:
 
+Every wake logs `wake word detected: hey_jarvis`. Stream the log into a file and
+count those lines:
+
+```
+esphome logs box3-jarvis.yaml --device box3-jarvis.local | tee wake.log
+grep -c 'wake word detected' wake.log
+```
+
 1. **True wakes.** Say "Hey Jarvis" 20 times, about 2 m from the device, at normal
-   volume, 5 seconds apart. Count the times the device lights up and starts
-   listening. Say nothing else.
+   volume, 5 seconds apart, then count the log lines. Say nothing else.
 2. **False wakes.** Leave the device alone for 2 hours with a TV or room noise
-   playing at normal volume, with nobody saying "Hey Jarvis". Count every wake.
+   playing at normal volume, with nobody saying "Hey Jarvis", then count the log
+   lines.
 
 Record:
 

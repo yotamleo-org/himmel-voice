@@ -105,6 +105,10 @@ micro_wake_word:
       probability_cutoff: ${wake_cutoff}
       sliding_window_size: ${wake_window}
   on_wake_word_detected:
+    # The README counts these log lines for true and false wakes.
+    - logger.log:
+        format: "wake word detected: %s"
+        args: ['wake_word.c_str()']
     - voice_assistant.start:
         wake_word: !lambda return wake_word;
 
@@ -113,7 +117,18 @@ voice_assistant:
   microphone: box_mic
   speaker: box_speaker
   micro_wake_word: mww
+  # Wake detection and speaker playback share one I2S bus: restart detection
+  # only once the reply has finished playing.
   on_end:
+    - wait_until:
+        not:
+          voice_assistant.is_running:
     - micro_wake_word.start:
   on_error:
     - micro_wake_word.start:
+  # The wake word stops after a detection; a wake that fires with no Home
+  # Assistant connection ends silently, so restart on reconnect.
+  on_client_connected:
+    - micro_wake_word.start:
+  on_client_disconnected:
+    - micro_wake_word.stop:
