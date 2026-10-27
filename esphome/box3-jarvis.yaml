@@ -1,0 +1,172 @@
+# ESP32-S3-BOX-3 voice satellite for Home Assistant Assist (HIMMEL-7777, tracker HIMMEL-7719).
+# "Hey Jarvis" is detected on the device by the hey_jarvis micro wake word; the stock
+# cutoff never fires on this hardware, so the cutoff is a substitution you tune.
+#
+#   esphome compile box3-jarvis.yaml                  # default cutoff below
+#   esphome -s wake_cutoff 0.60 compile box3-jarvis.yaml   # try another candidate
+substitutions:
+  name: box3-jarvis
+  # Probability the model must reach before a wake fires. Lower wakes more easily
+  # and also mis-wakes more; the stock hey_jarvis value is 0.97. See README.md.
+  wake_cutoff: "0.60"
+  # Number of consecutive frames averaged before the cutoff is compared.
+  wake_window: "5"
+
+esphome:
+  name: ${name}
+  friendly_name: Jarvis BOX-3
+  on_boot:
+    priority: -100
+    then:
+      - micro_wake_word.start:
+
+esp32:
+  board: esp32s3box
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+logger:
+
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+i2c:
+  - id: audio_bus
+    sda: GPIO8
+    scl: GPIO18
+
+i2s_audio:
+  - id: i2s_bus
+    i2s_mclk_pin: GPIO2
+    i2s_bclk_pin: GPIO17
+    i2s_lrclk_pin: GPIO45
+
+audio_adc:
+  - platform: es7210
+    id: es7210_adc
+    i2c_id: audio_bus
+    bits_per_sample: 16bit
+    sample_rate: 16000
+
+audio_dac:
+  - platform: es8311
+    id: es8311_dac
+    i2c_id: audio_bus
+    bits_per_sample: 16bit
+    sample_rate: 16000
+
+microphone:
+  - platform: i2s_audio
+    id: box_mic
+    i2s_audio_id: i2s_bus
+    i2s_din_pin: GPIO16
+    adc_type: external
+    pdm: false
+    sample_rate: 16000
+    bits_per_sample: 16bit
+
+speaker:
+  - platform: i2s_audio
+    id: box_speaker
+    i2s_audio_id: i2s_bus
+    i2s_dout_pin: GPIO15
+    dac_type: external
+    audio_dac: es8311_dac
+    sample_rate: 16000
+    bits_per_sample: 16bit
+    channel: mono
+
+# The speaker amplifier is gated by a GPIO.
+switch:
+  - platform: gpio
+    id: speaker_amp
+    pin: GPIO46
+    restore_mode: ALWAYS_ON
+
+micro_wake_word:
+  id: mww
+  microphone: box_mic
+  models:
+    - model: hey_jarvis
+      probability_cutoff: ${wake_cutoff}
+      sliding_window_size: ${wake_window}
+  on_wake_word_detected:
+    # The README counts these log lines for true and false wakes.
+    - logger.log:
+        format: "wake word detected: %s"
+        args: ['wake_word.c_str()']
+    - voice_assistant.start:
+        wake_word: !lambda return wake_word;
+
+voice_assistant:
+  id: va
+  microphone: box_mic
+  speaker: box_speaker
+  micro_wake_word: mww
+  # Wake detection and speaker playback share one I2S bus: restart detection
+  # only once the reply has finished playing. A start request is also dropped
+  # while the wake word is still stopping from the detection, so wait for both.
+  # Every restart also requires the API client: a disconnect during the wait
+  # stops detection, and it must stay stopped until the client returns.
+  on_end:
+    - wait_until:
+        condition:
+          and:
+            - not:
+                micro_wake_word.is_running:
+            - not:
+                voice_assistant.is_running:
+    - if:
+        condition:
+          api.connected:
+        then:
+          - micro_wake_word.start:
+  on_error:
+    - wait_until:
+        condition:
+          and:
+            - not:
+                micro_wake_word.is_running:
+            - not:
+                voice_assistant.is_running:
+    - if:
+        condition:
+          api.connected:
+        then:
+          - micro_wake_word.start:
+  # The wake word stops after a detection; a wake that fires with no Home
+  # Assistant connection ends silently, so restart on reconnect. A start
+  # request is dropped while the stop from the disconnect is still in progress,
+  # so let that finish first.
+  on_client_connected:
+    - wait_until:
+        condition:
+          not:
+            micro_wake_word.is_running:
+        timeout: 2s
+    - if:
+        condition:
+          and:
+            - api.connected:
+            - not:
+                micro_wake_word.is_running:
+            - not:
+                voice_assistant.is_running:
+        then:
+          - micro_wake_word.start:
+  on_client_disconnected:
+    - micro_wake_word.stop:

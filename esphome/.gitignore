@@ -1,0 +1,4 @@
+# wifi and api keys stay local; secrets.example.yaml is the tracked shape
+secrets.yaml
+# ESPHome build output
+.esphome/
