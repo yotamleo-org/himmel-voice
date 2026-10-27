@@ -56,6 +56,10 @@ class StubHA:
         self.registry = registry or {}
         self.pipelines = [dict(p) for p in pipelines or []]
         self.counters = []
+        self.input_numbers = []
+        self.dashboards = []
+        self.dashboard_configs = {}
+        self.services = []
         self.automations = {}
         self.calls = []
         self.server = socket.socket()
@@ -106,7 +110,9 @@ class StubHA:
         self.calls.append(f"{method} {path}")
         auto_id = path.rsplit("/", 1)[1]
         status = "200 OK"
-        if method == "POST":
+        if path.startswith("/api/services/"):
+            self.services.append((path, json.loads(body)))
+        elif method == "POST":
             self.automations[auto_id] = json.loads(body)
         elif self.automations.pop(auto_id, None) is None:
             status = "404 Not Found"
@@ -123,6 +129,27 @@ class StubHA:
             return self.counters[-1]
         if msg["type"] == "counter/delete":
             self.counters = [c for c in self.counters if c["id"] != msg["counter_id"]]
+            return None
+        if msg["type"] == "input_number/list":
+            return [dict(i) for i in self.input_numbers]
+        if msg["type"] == "input_number/create":
+            self.input_numbers.append({"id": msg["name"], **{k: v for k, v in msg.items() if k not in ("id", "type")}})
+            return self.input_numbers[-1]
+        if msg["type"] == "input_number/delete":
+            self.input_numbers = [i for i in self.input_numbers if i["id"] != msg["input_number_id"]]
+            return None
+        if msg["type"] == "lovelace/dashboards/list":
+            return [dict(d) for d in self.dashboards]
+        if msg["type"] == "lovelace/dashboards/create":
+            self.dashboards.append({"id": msg["url_path"].replace("-", "_"),
+                                    **{k: v for k, v in msg.items() if k not in ("id", "type")}})
+            return self.dashboards[-1]
+        if msg["type"] == "lovelace/dashboards/delete":
+            self.dashboards = [d for d in self.dashboards if d["id"] != msg["dashboard_id"]]
+            self.dashboard_configs = {}
+            return None
+        if msg["type"] == "lovelace/config/save":
+            self.dashboard_configs[msg["url_path"]] = msg["config"]
             return None
         if msg["type"] == "assist_pipeline/pipeline/list":
             return {"pipelines": [dict(p) for p in self.pipelines], "preferred_pipeline": self.pipelines[0]["id"]}
@@ -203,7 +230,7 @@ class AliasesTest(unittest.TestCase):
 
 
 class CapTest(unittest.TestCase):
-    SETUP = ("cap", "setup", "50", "assist_satellite.example_assist_satellite",
+    SETUP = ("cap", "setup", "10", "assist_satellite.example_assist_satellite",
              "select.example_assistant=Jarvis", "select.example_assistant_2=Nabu")
 
     def setUp(self):
@@ -223,7 +250,10 @@ class CapTest(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         for auto_id in ("himmel_cap_count", "himmel_cap_switch", "himmel_cap_reset"):
             self.assertIn(auto_id, r.stdout)
+        for needle in ("himmel_cap_usd_per_request", "himmel-voice-cap", "$10.00"):
+            self.assertIn(needle, r.stdout)
         self.assertEqual((self.stub.automations, self.stub.counters, len(self.stub.pipelines)), ({}, [], 2))
+        self.assertEqual((self.stub.input_numbers, self.stub.dashboards, self.stub.services), ([], [], []))
         self.assertFalse([c for c in self.stub.calls if c.endswith("/create") or c.startswith("POST")])
 
     def test_setup_creates_counter_local_pipeline_and_three_automations(self):
@@ -237,7 +267,20 @@ class CapTest(unittest.TestCase):
         self.assertNotIn("conversation.home_assistant", count)
         switch = self.stub.automations["himmel_cap_switch"]["actions"][0]
         self.assertEqual(switch["target"]["entity_id"], ["select.example_assistant", "select.example_assistant_2"])
-        self.assertIn('"above": 50', json.dumps(self.stub.automations["himmel_cap_switch"]))
+        trigger = self.stub.automations["himmel_cap_switch"]["triggers"][0]
+        self.assertEqual(trigger["trigger"], "template")
+        self.assertIn("counter.himmel_cap", trigger["value_template"])
+        self.assertIn("input_number.himmel_cap_usd_per_request", trigger["value_template"])
+        self.assertIn(">= 10", trigger["value_template"])
+        self.assertEqual([i["name"] for i in self.stub.input_numbers], ["himmel_cap_usd_per_request"])
+        self.assertEqual(self.stub.services, [("/api/services/input_number/set_value",
+                                               {"entity_id": "input_number.himmel_cap_usd_per_request", "value": 0.03})])
+        self.assertEqual([d["url_path"] for d in self.stub.dashboards], ["himmel-voice-cap"])
+        card = self.stub.dashboard_configs["himmel-voice-cap"]["views"][0]["cards"][0]
+        self.assertEqual(card["type"], "markdown")
+        for needle in ("counter.himmel_cap", "input_number.himmel_cap_usd_per_request", "$10.00", "himmel-cap-local",
+                       "select.example_assistant", "select.example_assistant_2", "timedelta(days=1)"):
+            self.assertIn(needle, card["content"])
         reset = [(a["target"]["entity_id"], a["data"]["option"]) for a in self.stub.automations["himmel_cap_reset"]["actions"]
                  if a["action"] == "select.select_option"]
         self.assertEqual(reset, [("select.example_assistant", "Jarvis"), ("select.example_assistant_2", "Nabu")])
@@ -248,12 +291,14 @@ class CapTest(unittest.TestCase):
 
     def test_rerun_overwrites_in_place(self):
         self.assertEqual(run_assist(self.stub, *self.SETUP).returncode, 0)
-        again = ("cap", "setup", "80", *self.SETUP[3:])
+        again = ("cap", "setup", "12.5", *self.SETUP[3:])
         self.assertEqual(run_assist(self.stub, *again).returncode, 0)
         self.assertEqual(len(self.stub.automations), 3)
-        self.assertEqual(len(self.stub.counters), 1)
+        self.assertEqual((len(self.stub.counters), len(self.stub.input_numbers), len(self.stub.dashboards)), (1, 1, 1))
         self.assertEqual(self.names(), ["Jarvis", "Nabu", "himmel-cap-local"])
-        self.assertIn('"above": 80', json.dumps(self.stub.automations["himmel_cap_switch"]))
+        self.assertIn(">= 12.5", self.stub.automations["himmel_cap_switch"]["triggers"][0]["value_template"])
+        self.assertIn("$12.50", self.stub.dashboard_configs["himmel-voice-cap"]["views"][0]["cards"][0]["content"])
+        self.assertEqual(len(self.stub.services), 1)  # the per-request figure is set once, so an edit in HA survives a re-run
 
     def test_remove_deletes_everything_and_is_repeatable(self):
         self.assertEqual(run_assist(self.stub, *self.SETUP).returncode, 0)
@@ -261,6 +306,7 @@ class CapTest(unittest.TestCase):
         self.assertEqual(len(self.stub.automations), 3)
         self.assertEqual(run_assist(self.stub, "cap", "remove").returncode, 0)
         self.assertEqual((self.stub.automations, self.stub.counters, self.names()), ({}, [], ["Jarvis", "Nabu"]))
+        self.assertEqual((self.stub.input_numbers, self.stub.dashboards), ([], []))
         self.assertEqual(run_assist(self.stub, "cap", "remove").returncode, 0)
 
 

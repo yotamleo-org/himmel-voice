@@ -5,7 +5,7 @@ Usage:
   python3 -I assist.py list
   python3 -I assist.py apply <allowlist file>
   python3 -I assist.py aliases <aliases file> [--dry-run]
-  python3 -I assist.py cap setup <daily cap> <satellite entity> <pipeline select entity>=<pipeline name>... [--dry-run]
+  python3 -I assist.py cap setup <daily cap in USD> <satellite entity> <pipeline select entity>=<pipeline name>... [--dry-run]
   python3 -I assist.py cap remove [--dry-run]
   python3 -I assist.py pipelines
   python3 -I assist.py satellite
@@ -18,9 +18,11 @@ entities, unexposes every other one, then audits. A denied entity is never expos
 even when allowlisted. `aliases` sets each listed entity's Assist aliases (one
 `entity_id: name, name` per line) to exactly that list, then re-reads and counts what is
 still missing; `--dry-run` prints the change and writes nothing. `cap setup` caps the
-LLM voice agents per day (HIMMEL-7780): a counter, a local-only pipeline, and three
+LLM voice agents at a daily USD estimate (HIMMEL-7780; HA reads no usage data, so spend is
+the call counter times an editable USD-per-request input_number): a counter, that
+input_number, a local-only pipeline, a dashboard card, and three
 automations (ids himmel_cap_*, overwritten in place on a re-run) that count each call to
-the named pipelines' conversation agents, past the cap switch every named pipeline select
+the named pipelines' conversation agents, once the estimate reaches the cap switch every named pipeline select
 (the BOX-3 has one per wake word) to the local-only pipeline with a spoken notice, and at
 midnight reset and select each one's pipeline again. The automations go through HA's REST config endpoint (the
 UI editor's call); `cap remove` deletes all of it. `pipelines` prints each assistant's engines and voice, `debug`
@@ -45,6 +47,9 @@ from urllib.parse import urlparse
 ASSISTANT = "conversation"
 CAP_COUNTER = "himmel_cap"
 CAP_PIPELINE = "himmel-cap-local"
+CAP_USD_INPUT = "himmel_cap_usd_per_request"
+CAP_DASHBOARD = "himmel-voice-cap"
+USD_PER_REQUEST = 0.03
 CAP_AUTOMATIONS = ("himmel_cap_count", "himmel_cap_switch", "himmel_cap_reset")
 CAP_NOTICE = "Daily AI limit reached. Local commands only until midnight."
 LOCAL_ENGINE = "conversation.home_assistant"
@@ -310,6 +315,24 @@ def rest(ws, method, path, body=None):
         raise RuntimeError(f"{method} {path}: HTTP {err.code}") from None
 
 
+def cap_spend_template():
+    return f"states('counter.{CAP_COUNTER}') | float(0) * states('input_number.{CAP_USD_INPUT}') | float(0)"
+
+
+def cap_card(cap, selects):
+    # no usage data is reachable from HA, so spend is the request count times a configurable USD figure
+    content = (
+        "Requests today: **{{ states('counter.@C@') | int(0) }}**\n\n"
+        "Estimated spend: **${{ (@SPEND@) | round(2) }}** of $@CAP@ "
+        "(at ${{ states('input_number.@U@') }} per request)\n\n"
+        "Capped: **{{ 'yes' if @SELECTS@ | select('is_state', '@P@') | list | length > 0 else 'no' }}**\n\n"
+        "Resets: **{{ (now().replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)).strftime('%a %H:%M') }}**")
+    for key, value in (("@C@", CAP_COUNTER), ("@SPEND@", cap_spend_template()), ("@CAP@", f"{cap:.2f}"),
+                       ("@U@", CAP_USD_INPUT), ("@SELECTS@", json.dumps(sorted(selects))), ("@P@", CAP_PIPELINE)):
+        content = content.replace(key, value)
+    return {"views": [{"title": "Voice cap", "cards": [{"type": "markdown", "title": "Voice agent daily cap", "content": content}]}]}
+
+
 def cap_automations(cap, agents, sat, selects):
     counter = f"counter.{CAP_COUNTER}"
     return {
@@ -319,7 +342,7 @@ def cap_automations(cap, agents, sat, selects):
             "actions": [{"action": "counter.increment", "target": {"entity_id": counter}}]},
         "himmel_cap_switch": {
             "alias": "Voice cap: switch to local-only", "mode": "single", "conditions": [],
-            "triggers": [{"trigger": "numeric_state", "entity_id": counter, "above": cap}],
+            "triggers": [{"trigger": "template", "value_template": f"{{{{ {cap_spend_template()} >= {cap:g} }}}}"}],
             "actions": [{"action": "select.select_option", "target": {"entity_id": sorted(selects)}, "data": {"option": CAP_PIPELINE}},
                         {"action": "assist_satellite.announce", "target": {"entity_id": sat}, "data": {"message": CAP_NOTICE}}]},
         "himmel_cap_reset": {
@@ -339,9 +362,19 @@ def cap_setup(ws, cap, sat, selects, dry_run):
     existing = next((p for p in ws.call("assist_pipeline/pipeline/list")["pipelines"] if p["name"] == CAP_PIPELINE), None)
     counter = {"name": CAP_COUNTER, "initial": 0, "step": 1, "restore": True}
     have_counter = any(c["name"] == CAP_COUNTER for c in ws.call("counter/list"))
+    usd = {"name": CAP_USD_INPUT, "min": 0, "max": 5, "step": 0.001, "mode": "box", "unit_of_measurement": "USD"}
+    have_usd = any(i["name"] == CAP_USD_INPUT for i in ws.call("input_number/list"))
+    dashboard = {"url_path": CAP_DASHBOARD, "title": "Voice cap", "icon": "mdi:cash-clock", "show_in_sidebar": True,
+                 "require_admin": False}
+    have_dashboard = any(d["url_path"] == CAP_DASHBOARD for d in ws.call("lovelace/dashboards/list"))
+    card = cap_card(cap, selects)
     verb = "would" if dry_run else "will"
     print(f"{verb} {'update' if existing else 'create'} pipeline {CAP_PIPELINE}: {json.dumps(local, sort_keys=True)}")
     print(f"{verb} {'keep' if have_counter else 'create'} counter: {json.dumps(counter)}")
+    print(f"{verb} {'keep' if have_usd else 'create'} input_number: {json.dumps(usd)}"
+          f"{'' if have_usd else f' and set it to {USD_PER_REQUEST} once'}")
+    print(f"{verb} {'keep' if have_dashboard else 'create'} dashboard: {json.dumps(dashboard)}")
+    print(f"{verb} save dashboard {CAP_DASHBOARD} config: {json.dumps(card)}")
     automations = cap_automations(cap, agents, sat, selects)
     for auto_id, payload in automations.items():
         print(f"{verb} set automation {auto_id}: {json.dumps(payload, sort_keys=True)}")
@@ -353,6 +386,13 @@ def cap_setup(ws, cap, sat, selects, dry_run):
         ws.call("assist_pipeline/pipeline/create", **local)
     if not have_counter:
         ws.call("counter/create", **counter)
+    if not have_usd:
+        ws.call("input_number/create", **usd)
+        rest(ws, "POST", "/api/services/input_number/set_value",
+             {"entity_id": f"input_number.{CAP_USD_INPUT}", "value": USD_PER_REQUEST})
+    if not have_dashboard:
+        ws.call("lovelace/dashboards/create", **dashboard)
+    ws.call("lovelace/config/save", url_path=CAP_DASHBOARD, config=card)
     for auto_id, payload in automations.items():
         rest(ws, "POST", f"/api/config/automation/config/{auto_id}", payload)
         print(f"set automation {auto_id}")
@@ -371,6 +411,14 @@ def cap_remove(ws, dry_run):
         if not dry_run:
             ws.call("counter/delete", counter_id=c["id"])
         print(f"{verb} counter {CAP_COUNTER}")
+    for i in (i for i in ws.call("input_number/list") if i["name"] == CAP_USD_INPUT):
+        if not dry_run:
+            ws.call("input_number/delete", input_number_id=i["id"])
+        print(f"{verb} input_number {CAP_USD_INPUT}")
+    for d in (d for d in ws.call("lovelace/dashboards/list") if d["url_path"] == CAP_DASHBOARD):
+        if not dry_run:
+            ws.call("lovelace/dashboards/delete", dashboard_id=d["id"])
+        print(f"{verb} dashboard {CAP_DASHBOARD}")
     for p in (p for p in ws.call("assist_pipeline/pipeline/list")["pipelines"] if p["name"] == CAP_PIPELINE):
         if not dry_run:
             ws.call("assist_pipeline/pipeline/delete", pipeline_id=p["id"])
@@ -382,9 +430,9 @@ def cap_command(args):
     dry_run = "--dry-run" in args
     args = [a for a in args if a != "--dry-run"]
     pairs = [a.partition("=") for a in args[3:]]
-    if (len(args) >= 4 and args[0] == "setup" and args[1].isdigit() and int(args[1]) > 0
+    if (len(args) >= 4 and args[0] == "setup" and re.fullmatch(r"\d+(\.\d+)?", args[1]) and float(args[1]) > 0
             and all(s and eq and name for s, eq, name in pairs)):
-        return lambda ws: cap_setup(ws, int(args[1]), args[2], {s: name for s, _, name in pairs}, dry_run)
+        return lambda ws: cap_setup(ws, float(args[1]), args[2], {s: name for s, _, name in pairs}, dry_run)
     if args == ["remove"]:
         return lambda ws: cap_remove(ws, dry_run)
     return None
