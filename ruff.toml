@@ -1,0 +1,3 @@
+[lint]
+# assist.py dispatches its subcommands through one lambda per branch.
+ignore = ["E731"]

@@ -1,6 +1,14 @@
 # himmel-voice
 Voice PA for the ESP32-S3-BOX-3 with Home Assistant: Wyoming, ESPHome and HA config as code. A himmel adapter (HIMMEL-7719).
 
+## Hooks
+
+Once per clone, with `HIMMEL_ROOT` pointing at a himmel checkout (the leak-classes gate runs from there):
+
+    pre-commit install -t pre-commit -t commit-msg
+
+They refuse a secret (gitleaks), a LAN address, MAC, home path or station hostname (leak-classes), a commit on `main`, and a commit subject that is not conventional with a `HIMMEL-<n>` ticket.
+
 ## wyoming/
 
 Speech-to-text (faster-whisper, `small-int8`, English) and text-to-speech (Piper) for Home Assistant's Wyoming integration. Images are pinned by digest in `images.lock`, the one pin site; containers run non-root with a read-only rootfs.
