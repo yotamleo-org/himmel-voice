@@ -118,13 +118,25 @@ voice_assistant:
   speaker: box_speaker
   micro_wake_word: mww
   # Wake detection and speaker playback share one I2S bus: restart detection
-  # only once the reply has finished playing.
+  # only once the reply has finished playing. A start request is also dropped
+  # while the wake word is still stopping from the detection, so wait for both.
   on_end:
     - wait_until:
-        not:
-          voice_assistant.is_running:
+        condition:
+          and:
+            - not:
+                micro_wake_word.is_running:
+            - not:
+                voice_assistant.is_running:
     - micro_wake_word.start:
   on_error:
+    - wait_until:
+        condition:
+          and:
+            - not:
+                micro_wake_word.is_running:
+            - not:
+                voice_assistant.is_running:
     - micro_wake_word.start:
   # The wake word stops after a detection; a wake that fires with no Home
   # Assistant connection ends silently, so restart on reconnect. A start
@@ -139,6 +151,7 @@ voice_assistant:
     - if:
         condition:
           and:
+            - api.connected:
             - not:
                 micro_wake_word.is_running:
             - not:
