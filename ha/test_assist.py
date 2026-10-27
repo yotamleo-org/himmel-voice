@@ -54,6 +54,7 @@ class StubHA:
 
     def __init__(self, registry):
         self.registry = registry
+        self.scramble = False  # HA releases keep aliases in a set, so the order is not the written one
         self.calls = []
         self.server = socket.socket()
         self.server.bind(("127.0.0.1", 0))
@@ -92,7 +93,8 @@ class StubHA:
         if msg["type"] == "config/entity_registry/list":  # partial entries: no aliases, as in HA
             return [{"entity_id": e} for e in self.registry]
         if msg["type"] == "config/entity_registry/get_entries":
-            return {e: dict(self.registry[e]) if e in self.registry else None for e in msg["entity_ids"]}
+            return {e: {**self.registry[e], "aliases": self.registry[e]["aliases"][::-1] if self.scramble else self.registry[e]["aliases"]}
+                    if e in self.registry else None for e in msg["entity_ids"]}
         if msg["type"] == "config/entity_registry/update":
             self.registry[msg["entity_id"]]["aliases"] = msg["aliases"]
             return {"entity_entry": self.registry[msg["entity_id"]]}
@@ -145,6 +147,24 @@ class AliasesTest(unittest.TestCase):
         r = run_assist(self.stub, "aliases", self.path)
         self.assertEqual(r.returncode, 2)
         self.assertIn("no colon", r.stderr)
+        self.assertNotIn("config/entity_registry/update", self.stub.calls)
+
+    def test_aliases_returned_out_of_order_are_not_missing_and_not_rewritten(self):
+        with open(self.path, "w") as f:
+            f.write("fan.bedroom_purifier: air purifier, purifier, air purifier\n")
+        self.stub.scramble = True
+        self.assertEqual(run_assist(self.stub, "aliases", self.path).returncode, 0)
+        self.assertEqual(self.stub.registry["fan.bedroom_purifier"]["aliases"], ["air purifier", "purifier"])
+        self.stub.calls.clear()
+        self.assertEqual(run_assist(self.stub, "aliases", self.path).returncode, 0)
+        self.assertNotIn("config/entity_registry/update", self.stub.calls)
+
+    def test_duplicate_entity_is_refused_and_writes_nothing(self):
+        with open(self.path, "w") as f:
+            f.write("fan.bedroom_purifier: air purifier\nfan.bedroom_purifier: purifier\n")
+        r = run_assist(self.stub, "aliases", self.path)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("duplicate entity", r.stderr)
         self.assertNotIn("config/entity_registry/update", self.stub.calls)
 
     def test_clean_file_is_exit_zero_after_apply(self):
