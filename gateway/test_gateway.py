@@ -140,6 +140,11 @@ class NoteTests(Base):
             self.assertEqual(self.call(method, "/note")[0], 405, method)
         self.assertEqual(self.call("POST", "/nope", NOTE)[0], 404)
 
+    def test_lone_surrogate_is_400_and_leaves_no_file(self):
+        raw = b'{"title": "x", "body": "\\ud800", "brain": "codex"}'
+        self.assertEqual(self.call("POST", "/note", raw=raw)[0], 400)
+        self.assertEqual(self.files(self.inbox), [])
+
     def test_bad_json_is_400(self):
         self.assertEqual(self.call("POST", "/note", raw=b"{not json")[0], 400)
         self.assertEqual(self.call("POST", "/note", {"title": "x"})[0], 400)
@@ -185,6 +190,21 @@ class SearchTests(Base):
         os.symlink(self.outside, self.inbox)
         self.assertEqual(self.call("POST", "/search", {"q": "heat"})[1]["results"], [])
 
+    def test_search_root_ancestor_swapped_for_symlink_after_start_not_followed(self):
+        os.makedirs(os.path.join(self.outside, "voice"))
+        with open(os.path.join(self.outside, "voice", "leak.md"), "w") as f:
+            f.write("heat pumps leaked")
+        self.start()
+        os.rename(os.path.join(self.vault, "00-Inbox"), os.path.join(self.tmp.name, "moved"))
+        os.symlink(self.outside, os.path.join(self.vault, "00-Inbox"))
+        self.assertEqual(self.call("POST", "/search", {"q": "heat"})[1]["results"], [])
+
+    def test_fifo_named_md_does_not_hang_search(self):
+        os.mkfifo(os.path.join(self.inbox, "pipe.md"))
+        self.write("00-Inbox/voice/a.md", "heat pumps")
+        paths = [r["path"] for r in self.call("POST", "/search", {"q": "heat"})[1]["results"]]
+        self.assertEqual(paths, ["00-Inbox/voice/a.md"])
+
     def test_search_keeps_the_best_five(self):
         for i in range(8):
             self.write(f"00-Inbox/voice/n{i}.md", "heat " * (i + 1))
@@ -218,7 +238,7 @@ class ConfigTests(unittest.TestCase):
     def test_lan_bind_allows_ha_host_and_the_station(self):
         cfg = gateway.load_config({**self.env, "VOICE_GATEWAY_BIND": "192.0.2.10", "HA_HOST": "192.0.2.5"})
         self.assertEqual(cfg["peers"], {"192.0.2.5", "192.0.2.10"})
-        self.assertEqual(cfg["search_dirs"], [os.path.join(os.path.realpath(self.tmp.name), "00-Inbox", "voice")])
+        self.assertEqual(cfg["search_dirs"], [os.path.join("00-Inbox", "voice")])
 
 
 if __name__ == "__main__":

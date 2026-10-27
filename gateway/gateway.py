@@ -73,7 +73,7 @@ def load_config(env):
         real = os.path.realpath(os.path.join(vault, rel))
         if not inside(real, vault) or not os.path.isdir(real):
             die(f"search dir {rel!r} is not a directory inside the vault")
-        search_dirs.append(real)
+        search_dirs.append(os.path.relpath(real, vault))
     peers = {str(bind)} | ({str(ha_host)} if ha_host else set())
     return {"token": token, "vault": vault, "bind": str(bind), "port": port,
             "peers": peers, "search_dirs": search_dirs}
@@ -88,23 +88,36 @@ def slugify(title):
     return re.sub(r"[^a-z0-9]+", "-", s).strip("-")[:60].rstrip("-") or "note"
 
 
+def open_dir(vault, rel):
+    """Open vault/rel by directory fd, refusing a symlink at every component; None if any is one.
+
+    A component swapped for a link after a startup check cannot redirect what happens below it."""
+    dfd = os.open(vault, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    for part in rel.split(os.sep):
+        if part in ("", "."):
+            continue
+        try:
+            nfd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=dfd)
+        except OSError:
+            nfd = None
+        os.close(dfd)
+        if nfd is None:
+            return None
+        dfd = nfd
+    return dfd
+
+
 def write_note(vault, title, body, brain):
     """Create one inbox file; return its vault-relative path, or None if the inbox is not confined."""
     created = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
     text = (f"---\ntitle: {json.dumps(title, ensure_ascii=False)}\nbrain: {brain}\n"
             f"created: {created}\nsource: voice-gateway\ntags: [voice]\n---\n\n{body.rstrip()}\n")
+    data = text.encode("utf-8")  # raises before any file exists, e.g. on a lone surrogate
     stem = f"{today()}-{brain}-{slugify(title)}"
-    # Walk vault -> 00-Inbox -> voice through dir fds, refusing a symlink at every step, so a
-    # component swapped for a link after any check cannot redirect the write.
-    dfd = os.open(vault, os.O_RDONLY | os.O_DIRECTORY)
+    dfd = open_dir(vault, INBOX)
+    if dfd is None:
+        return None
     try:
-        for part in INBOX.split(os.sep):
-            try:
-                nfd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dfd)
-            except OSError:
-                return None
-            os.close(dfd)
-            dfd = nfd
         for n in range(1, 100):
             name = f"{stem}.md" if n == 1 else f"{stem}-{n}.md"
             try:
@@ -112,8 +125,8 @@ def write_note(vault, title, body, brain):
                              0o644, dir_fd=dfd)
             except FileExistsError:
                 continue
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(text)
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
             return f"00-Inbox/voice/{name}"
     finally:
         os.close(dfd)
@@ -139,49 +152,58 @@ def split_note(text, fallback):
 def read_note(dfd, name):
     """Read a regular file under dfd without following a symlink; None if it is not one."""
     try:
-        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=dfd)
+        # O_NONBLOCK: opening a FIFO must not hang the worker before the regular-file check.
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=dfd)
     except OSError:
         return None
-    with os.fdopen(fd, encoding="utf-8", errors="replace") as f:
+    with os.fdopen(fd, "rb") as f:
         st = os.fstat(fd)
         if not stat.S_ISREG(st.st_mode):
             return None
-        return f.read(MAX_READ), st.st_mtime
+        return f.read(MAX_READ).decode("utf-8", errors="replace"), st.st_mtime
+
+
+def scan(rootfd, rel, terms, seen):
+    """Yield a ranked item per matching note below rootfd; fwalk follows no symlink and opens by fd."""
+    for d, dirs, files, dfd in os.fwalk(".", dir_fd=rootfd, follow_symlinks=False):
+        dirs[:] = [x for x in dirs if not x.startswith(".")]
+        for name in files:
+            p = os.path.normpath(os.path.join(rel, d, name))
+            if not name.endswith(".md") or p in seen:
+                continue
+            seen.add(p)
+            got = read_note(dfd, name)
+            if got is None:
+                continue
+            text, mtime = got
+            low = text.lower()
+            matched = [t for t in terms if t in low]
+            if matched:
+                yield ((len(matched), sum(low.count(t) for t in matched), mtime), len(seen), p, text, matched)
 
 
 def search(cfg, q):
     terms = list(dict.fromkeys(t for t in re.findall(r"\w+", q.lower()) if len(t) >= 3))[:8]
     best, seen = [], set()
-    for root in cfg["search_dirs"]:
-        # fwalk never follows a symlink, the root included, and opens each level by dir fd.
-        for d, dirs, files, dfd in os.fwalk(root, follow_symlinks=False):
-            dirs[:] = [x for x in dirs if not x.startswith(".")]
-            for name in files:
-                p = os.path.join(d, name)
-                if not name.endswith(".md") or p in seen:
-                    continue
-                seen.add(p)
-                got = read_note(dfd, name)
-                if got is None:
-                    continue
-                text, mtime = got
-                low = text.lower()
-                matched = [t for t in terms if t in low]
-                if not matched:
-                    continue
-                item = ((len(matched), sum(low.count(t) for t in matched), mtime), len(seen), p, text, matched)
+    for rel in cfg["search_dirs"]:
+        rootfd = open_dir(cfg["vault"], rel)
+        if rootfd is None:
+            continue
+        try:
+            for item in scan(rootfd, rel, terms, seen):
                 if len(best) < RESULTS:
                     heapq.heappush(best, item)
                 else:
                     heapq.heappushpop(best, item)
+        finally:
+            os.close(rootfd)
     out = []
     for _, _, p, text, matched in sorted(best, reverse=True):
         title, body = split_note(text, os.path.splitext(os.path.basename(p))[0])
         at = max(body.lower().find(matched[0]), 0)
         start = max(at - SNIPPET // 3, 0)
         snippet = " ".join(body[start:start + SNIPPET].split())
-        out.append({"path": os.path.relpath(p, cfg["vault"]).replace(os.sep, "/"), "title": title,
-                    "snippet": snippet})
+        out.append({"path": p.replace(os.sep, "/"), "title": title, "snippet": snippet})
     return out
 
 
@@ -247,7 +269,11 @@ class Handler(BaseHTTPRequestHandler):
                     and not PATHLIKE.search(title)):
                 self.reply(400, {"error": "title (no path), body and brain ([a-z0-9-]) are required"})
                 return
-            path = write_note(self.cfg["vault"], title.strip(), body, brain)
+            try:
+                path = write_note(self.cfg["vault"], title.strip(), body, brain)
+            except UnicodeEncodeError:
+                self.reply(400, {"error": "title and body must be valid text"})
+                return
             if path is None:
                 self.reply(403, {"error": "the inbox is not a plain directory inside the vault"})
                 return
