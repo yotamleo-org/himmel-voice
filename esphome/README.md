@@ -44,19 +44,26 @@ flash each, in this order: 0.50, 0.60, 0.70, 0.80.
 
 For each candidate:
 
-Every wake logs `wake word detected: hey_jarvis`. Stream the log into a file and
-count those lines:
-
-```
-esphome logs box3-jarvis.yaml --device box3-jarvis.local | tee wake.log
-grep -c 'wake word detected' wake.log
-```
+Every wake logs `wake word detected: hey_jarvis`. Each phase below gets its own
+log file, so the true wakes never land in the false-wake count. Stop the logger
+with Ctrl-C when the phase ends.
 
 1. **True wakes.** Say "Hey Jarvis" 20 times, about 2 m from the device, at normal
-   volume, 5 seconds apart, then count the log lines. Say nothing else.
+   volume. After each try wait for the reply to finish before the next one:
+   wake detection restarts only after the device stops speaking. Say nothing else.
+
+   ```
+   esphome logs box3-jarvis.yaml --device box3-jarvis.local | tee true-wakes.log
+   grep -c 'wake word detected' true-wakes.log
+   ```
+
 2. **False wakes.** Leave the device alone for 2 hours with a TV or room noise
-   playing at normal volume, with nobody saying "Hey Jarvis", then count the log
-   lines.
+   playing at normal volume, with nobody saying "Hey Jarvis".
+
+   ```
+   esphome logs box3-jarvis.yaml --device box3-jarvis.local | tee false-wakes.log
+   grep -c 'wake word detected' false-wakes.log
+   ```
 
 Record:
 

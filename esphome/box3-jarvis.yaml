@@ -127,8 +127,23 @@ voice_assistant:
   on_error:
     - micro_wake_word.start:
   # The wake word stops after a detection; a wake that fires with no Home
-  # Assistant connection ends silently, so restart on reconnect.
+  # Assistant connection ends silently, so restart on reconnect. A start
+  # request is dropped while the stop from the disconnect is still in progress,
+  # so let that finish first.
   on_client_connected:
-    - micro_wake_word.start:
+    - wait_until:
+        condition:
+          not:
+            micro_wake_word.is_running:
+        timeout: 2s
+    - if:
+        condition:
+          and:
+            - not:
+                micro_wake_word.is_running:
+            - not:
+                voice_assistant.is_running:
+        then:
+          - micro_wake_word.start:
   on_client_disconnected:
     - micro_wake_word.stop:
