@@ -13,8 +13,13 @@ They refuse a secret (gitleaks), a LAN address, MAC, home path or station hostna
 
 Speech-to-text (faster-whisper, `small-int8`, English) and text-to-speech (Piper) for Home Assistant's Wyoming integration. Images are pinned by digest in `images.lock`, the one pin site; containers run non-root with a read-only rootfs.
 
+    cd wyoming
     mkdir -p data/whisper data/piper
-    sudo docker compose --env-file images.lock up -d
+    sudo chown -R 1000:1000 data
+    echo 'BIND_ADDR=<station LAN address>' > .env
+    sudo docker compose --env-file images.lock --env-file .env up -d
+
+The ports bind to 127.0.0.1 unless `BIND_ADDR` is set; `.env` is untracked. The containers run as UID 1000, so `data/` must be theirs.
 
 `python3 -I roundtrip.py [host] ["sentence"] [runs] [stt_port]` speaks a sentence with Piper, transcribes it with Whisper and prints the timings.
 

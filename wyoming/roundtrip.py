@@ -85,6 +85,9 @@ def main():
     text = sys.argv[2] if len(sys.argv) > 2 else "Turn on the kitchen light"
     runs = int(sys.argv[3]) if len(sys.argv) > 3 else 1
     stt_port = int(sys.argv[4]) if len(sys.argv) > 4 else 10300
+    if runs < 1:
+        print(__doc__, file=sys.stderr)
+        sys.exit(2)
     ok = True
     for n in range(runs):
         fmt, audio, tts_first, tts_total = synthesize(host, text)

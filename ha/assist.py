@@ -17,7 +17,7 @@ the events of a pipeline's latest run, `voice` sets a pipeline's text-to-speech 
 
 HA_URL (http://host:8123) and HA_TOKEN come from the environment, never from argv,
 and the token is never printed.
-Exit: 0 clean, 1 an audit finding or a refused allowlist entry, 2 usage or connection error.
+Exit: 0 clean, 1 an audit finding or a refused allowlist entry, 2 a usage, connection or response error.
 """
 import base64
 import json
@@ -37,6 +37,8 @@ DENY_WORDS = re.compile(r"grow|tent|ggs|bluelab|guardian|bucket|heater|heizung|h
 class WS:
     def __init__(self, url):
         u = urlparse(url)
+        if u.scheme not in ("http", "https") or not u.hostname:
+            raise ConnectionError("HA_URL must look like http://host:8123 or https://host")
         port = u.port or (443 if u.scheme == "https" else 80)
         sock = socket.create_connection((u.hostname, port), timeout=30)
         if u.scheme == "https":
@@ -171,7 +173,7 @@ def list_entities(ws):
 def apply(ws, path):
     with open(path, encoding="utf-8") as f:
         wanted = {line.split("#", 1)[0].strip() for line in f} - {""}
-    names, _, _ = snapshot(ws)
+    names, exposed, _ = snapshot(ws)
     refused = sorted(e for e in wanted if denied(e, names.get(e, "")))
     unknown = sorted(e for e in wanted if e not in names)
     for e in refused:
@@ -180,7 +182,7 @@ def apply(ws, path):
         print(f"unknown entity, skipped: {e}")
     allow = sorted(wanted - set(refused) - set(unknown))
     ws.call("homeassistant/expose_new_entities/set", assistant=ASSISTANT, expose_new=False)
-    others = sorted(set(names) - set(allow))
+    others = sorted((set(names) | set(exposed)) - set(allow))
     if others:
         ws.call("homeassistant/expose_entity", assistants=[ASSISTANT], entity_ids=others, should_expose=False)
     if allow:
@@ -280,7 +282,7 @@ def main():
         sys.exit(2)
     try:
         rc = cmd(connect())
-    except (OSError, ConnectionError, RuntimeError) as err:
+    except (OSError, ConnectionError, RuntimeError, ValueError, KeyError, TypeError) as err:
         fail(err)
     sys.exit(1 if rc else 0)
 
