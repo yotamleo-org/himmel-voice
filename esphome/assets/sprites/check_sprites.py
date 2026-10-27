@@ -69,6 +69,8 @@ def read_png(path):
     while pos < len(data):
         length, kind = struct.unpack(">I4s", data[pos:pos + 8])
         body = data[pos + 8:pos + 8 + length]
+        if data[pos + 8 + length:pos + 12 + length] != struct.pack(">I", zlib.crc32(kind + body)):
+            raise ValueError(f"bad CRC on {kind.decode(errors='replace')} chunk")
         pos += 12 + length
         if kind == b"IHDR":
             width, height, depth, ctype, _, _, interlace = struct.unpack(">IIBBBBB", body)
@@ -114,7 +116,8 @@ def main():
                 continue
             try:
                 width, height, colours = read_png(path)
-            except (ValueError, zlib.error, struct.error) as exc:
+            except (ValueError, IndexError, TypeError, NameError, zlib.error, struct.error) as exc:
+                # A truncated or malformed PNG fails this strip and the check goes on.
                 errors.append(f"{path.name}: {exc}")
                 continue
             frames, rest = divmod(width, height)
