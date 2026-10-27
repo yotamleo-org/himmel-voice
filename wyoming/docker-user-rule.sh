@@ -18,24 +18,24 @@ chain=WYOMING-USER
 # Owning DOCKER-USER and its FORWARD jump puts the rules in place before any container can
 # publish a port. Some docker versions skip their own jump when the chain already exists
 # (moby issue 46147), so the jump is made here too; a second one is harmless.
-iptables -n -L DOCKER-USER >/dev/null 2>&1 || iptables -N DOCKER-USER
-iptables -C FORWARD -j DOCKER-USER 2>/dev/null || iptables -I FORWARD 1 -j DOCKER-USER
-iptables -n -L "$chain" >/dev/null 2>&1 || iptables -N "$chain"
+iptables -w -n -L DOCKER-USER >/dev/null 2>&1 || iptables -w -N DOCKER-USER
+iptables -w -C FORWARD -j DOCKER-USER 2>/dev/null || iptables -w -I FORWARD 1 -j DOCKER-USER
+iptables -w -n -L "$chain" >/dev/null 2>&1 || iptables -w -N "$chain"
 
 # Rules are appended, so they are evaluated in this order. Traffic a container sends arrives
 # on a docker bridge: leave it alone (a container's own outbound connection to port 10200 or
 # 10300 carries the same original destination port).
 for bridge in docker0 br-+; do
-    iptables -C "$chain" -i "$bridge" -j RETURN 2>/dev/null || iptables -A "$chain" -i "$bridge" -j RETURN
+    iptables -w -C "$chain" -i "$bridge" -j RETURN 2>/dev/null || iptables -w -A "$chain" -i "$bridge" -j RETURN
 done
 # Everything else aimed at a Wyoming port, from anyone but HA_HOST, is dropped: a published
 # port after Docker's DNAT, and a LAN host routing straight to the container address. --ctdir
 # ORIGINAL keeps the container's replies (source not HA_HOST) out of the match.
 for port in 10200 10300; do
     rule=(-p tcp -m conntrack --ctorigdstport "$port" --ctdir ORIGINAL ! -s "$ha_host" -j DROP)
-    iptables -C "$chain" "${rule[@]}" 2>/dev/null || iptables -A "$chain" "${rule[@]}"
+    iptables -w -C "$chain" "${rule[@]}" 2>/dev/null || iptables -w -A "$chain" "${rule[@]}"
 done
-iptables -C DOCKER-USER -j "$chain" 2>/dev/null || iptables -I DOCKER-USER 1 -j "$chain"
+iptables -w -C DOCKER-USER -j "$chain" 2>/dev/null || iptables -w -I DOCKER-USER 1 -j "$chain"
 
 # Remove what an earlier HA_HOST or an earlier version of this script left behind: DROP rules
 # for another address (two negated rules drop both addresses), and the rules the first
@@ -43,8 +43,8 @@ iptables -C DOCKER-USER -j "$chain" 2>/dev/null || iptables -I DOCKER-USER 1 -j 
 while IFS= read -r line; do
     [ -n "$line" ] || continue
     read -ra del <<<"${line/#-A/-D}"
-    iptables "${del[@]}"
+    iptables -w "${del[@]}"
 done < <(
-    { iptables -S "$chain" | grep -F -e ' -j DROP' | grep -F -v -e "! -s $ha_host/32 " || true
-      iptables -S DOCKER-USER | grep -F -e '--comment wyoming-docker-user' || true; }
+    { iptables -w -S "$chain" | grep -F -e ' -j DROP' | grep -F -v -e "! -s $ha_host/32 " || true
+      iptables -w -S DOCKER-USER | grep -F -e '--comment wyoming-docker-user' || true; }
 )

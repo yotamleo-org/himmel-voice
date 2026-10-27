@@ -1,0 +1,7 @@
+[Unit]
+Description=Re-apply the Wyoming port rule after a firewall flush (DOCKER-USER)
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/himmel-voice/docker-user.env
+ExecStart=/usr/bin/flock /run/wyoming-docker-user.lock /usr/local/sbin/wyoming-docker-user-rule

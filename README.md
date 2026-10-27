@@ -30,8 +30,12 @@ Docker's published ports bypass ufw, and the kernel forgets a hand-added `DOCKER
     echo 'HA_HOST=192.0.2.5' | sudo tee /etc/himmel-voice/docker-user.env    # the Home Assistant host's address
     sudo systemctl daemon-reload
     sudo systemctl enable --now wyoming-docker-user.service
+    sudo install -m 644 wyoming-docker-user-refresh.service wyoming-docker-user.timer /etc/systemd/system/
+    sudo systemctl daemon-reload && sudo systemctl enable --now wyoming-docker-user.timer
     sudo iptables -S WYOMING-USER    # two RETURN rules for the docker bridges, then a DROP per port
     sudo docker compose --env-file images.lock --env-file .env up -d
+
+The rule script waits for the xtables lock (`iptables -w`), and the timer re-runs it every minute because a runtime firewall flush (`iptables -F`, a firewalld reload) wipes the chain; the rule is back within a minute. To restore it at once: `sudo systemctl start wyoming-docker-user-refresh.service`. `bash wyoming/test-docker-user-rule.sh` checks this in a private namespace.
 
 To change `HA_HOST`, edit the file and run `sudo systemctl reload wyoming-docker-user.service`; the old address's rules are replaced. Do not `restart` the unit: docker requires it and would stop. A `DOCKER-USER` rule added by hand earlier is not touched; delete it once this one is in.
 
