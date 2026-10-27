@@ -3,8 +3,9 @@
 # cutoff never fires on this hardware, so the cutoff is a substitution you tune.
 #
 # The screen (HIMMEL-7815) shows the voice state, the reply and a pixel-art mascot for
-# the agent each wake word calls: "Hey Jarvis" Claude, "Hey Mycroft" Codex and
-# "Hey Grok" Grokbot. BOOT talks without a wake word, or stops a reply. See README.md.
+# the agent that answers, read from the pipeline name of the slot that ran: "Hey
+# Jarvis" runs the first slot, "Okay Nabu" the second. BOOT talks without a wake
+# word, or stops a reply. See README.md.
 #
 #   esphome compile box3-jarvis.yaml                  # default cutoff below
 #   esphome -s wake_cutoff 0.60 compile box3-jarvis.yaml   # try another candidate
@@ -15,11 +16,16 @@ substitutions:
   wake_cutoff: "0.60"
   # Number of consecutive frames averaged before the cutoff is compared.
   wake_window: "5"
-  # The first Assistant select of this device in Home Assistant, and the pipeline
-  # the HIMMEL-7780 daily cap switches it to. The screen shows "Local only" while
-  # the select holds the cap pipeline.
+  # The two Assistant selects of this device in Home Assistant, and the pipeline
+  # the HIMMEL-7780 daily cap switches them to. The screen shows "Local only" while
+  # either select holds the cap pipeline.
   pipeline_select: select.jarvis_box_3_assistant
+  pipeline_select_2: select.jarvis_box_3_assistant_2
   cap_pipeline: himmel-cap-local
+
+# The mascot animations and their frame rates.
+packages:
+  mascots: !include assets/mascots.yaml
 
 esphome:
   name: ${name}
@@ -27,9 +33,6 @@ esphome:
   on_boot:
     priority: -100
     then:
-      # Home Assistant enables the wake words its slots name; it never sees the
-      # internal Hey Grok model, so the device enables that one itself.
-      - micro_wake_word.enable_model: grok_ww
       - if:
           condition:
             switch.is_off: mute
@@ -194,7 +197,11 @@ button:
       - script.execute: push_to_talk
 
 globals:
-  # The agent on screen: 0 Claude, 1 Codex, 2 Grokbot.
+  # The slot that ran last: 0 the first (Hey Jarvis, push-to-talk), 1 the second.
+  - id: slot
+    type: int
+    initial_value: "0"
+  # The agent on screen, from that slot's pipeline name: 0 Claude, 1 Codex, 2 Grokbot.
   - id: agent
     type: int
     initial_value: "0"
@@ -202,9 +209,12 @@ globals:
   - id: phase
     type: int
     initial_value: "0"
-  # Counts animation ticks for the mascot frames.
-  - id: tick
-    type: int
+  # The mascot animation on screen, and when it last changed frame.
+  - id: mascot_clip
+    type: animation::Animation *
+    initial_value: "nullptr"
+  - id: frame_at
+    type: uint32_t
     initial_value: "0"
   - id: reply_text
     type: std::string
@@ -227,8 +237,9 @@ script:
                     - api.connected:
                     - switch.is_off: mute
                 then:
-                  # A start without a wake word runs the first pipeline, Claude's.
-                  - lambda: id(agent) = 0;
+                  # A start without a wake word runs the first slot's pipeline.
+                  - lambda: id(slot) = 0;
+                  - script.execute: pick_agent
                   # Stop the wake word first, so the restart in on_end runs as
                   # after a wake.
                   - micro_wake_word.stop:
@@ -249,24 +260,30 @@ script:
           then:
             - lambda: id(phase) = 0;
             - component.update: box_display
+  # The mascot follows the agent that answers: the pipeline name of the slot that
+  # runs, so a slot switched to another pipeline in Home Assistant switches mascot.
+  - id: pick_agent
+    then:
+      - lambda: |-
+          auto *pipeline = id(slot) == 1 ? id(assistant_2) : id(assistant_1);
+          std::string n = pipeline->has_state() ? pipeline->state : "";
+          for (auto &c : n) c = std::tolower((unsigned char) c);
+          auto has = [&](const char *word) { return n.find(word) != std::string::npos; };
+          id(agent) = has("codex") || has("gpt") || has("openai") ? 1 : has("grok") ? 2 : 0;
+      - component.update: box_display
 
 micro_wake_word:
   id: mww
   microphone: box_mic
+  # Home Assistant offers a satellite two wake word slots, each with its own
+  # pipeline: Hey Jarvis goes in the first, Okay Nabu in the second.
   models:
     - model: hey_jarvis
       id: jarvis_ww
       probability_cutoff: ${wake_cutoff}
       sliding_window_size: ${wake_window}
-    - model: hey_mycroft
-      id: mycroft_ww
-    # Home Assistant offers a satellite two wake word slots, each with its own
-    # pipeline: Hey Jarvis goes in the first (Claude), Hey Mycroft in the second
-    # (Codex). Hey Grok is internal: it shows Grokbot and runs the second slot.
-    # Model: TaterTotterson/Tater-Wake-Words (MIT).
-    - model: https://raw.githubusercontent.com/TaterTotterson/Tater-Wake-Words/main/microWakeWordsV7/hey_grok.esphome.json
-      id: grok_ww
-      internal: true
+    - model: okay_nabu
+      id: nabu_ww
   on_wake_word_detected:
     # The README counts these log lines for true and false wakes.
     - logger.log:
@@ -275,20 +292,23 @@ micro_wake_word:
     - lambda: |-
         std::string w = wake_word;
         for (auto &c : w) c = std::tolower((unsigned char) c);
-        id(agent) = w == "hey mycroft" ? 1 : w == "hey grok" ? 2 : 0;
+        id(slot) = w == "okay nabu" ? 1 : 0;
+    - script.execute: pick_agent
     - voice_assistant.start:
         # Home Assistant picks the pipeline by the phrase of a slot's wake word.
-        wake_word: !lambda 'return id(agent) == 2 ? std::string("Hey Mycroft") : wake_word;'
+        wake_word: !lambda return wake_word;
 
 voice_assistant:
   id: va
   microphone: box_mic
   media_player: box_media_player
   micro_wake_word: mww
-  # As the official BOX-3 config.
+  # As the official BOX-3 config, except the stock volume_multiplier: the
+  # official 2.0 plays replies far too loud here. The media player volume in
+  # Home Assistant sets the level.
   noise_suppression_level: 2
   auto_gain: 31dBFS
-  volume_multiplier: 2.0
+  volume_multiplier: 1.0
   on_listening:
     - lambda: |-
         id(phase) = 1;
@@ -384,14 +404,21 @@ voice_assistant:
     - micro_wake_word.stop:
     - component.update: box_display
 
-# The pipeline the first slot runs; "Local only" shows while it is the cap's.
+# The pipeline each slot runs: it picks the mascot, and "Local only" shows while
+# either is the cap's.
 text_sensor:
   - platform: homeassistant
-    id: pipeline_state
+    id: assistant_1
     entity_id: ${pipeline_select}
     internal: true
     on_value:
-      - component.update: box_display
+      - script.execute: pick_agent
+  - platform: homeassistant
+    id: assistant_2
+    entity_id: ${pipeline_select_2}
+    internal: true
+    on_value:
+      - script.execute: pick_agent
 
 # --- Screen -------------------------------------------------------------------
 
@@ -423,22 +450,6 @@ touchscreen:
     on_touch:
       - script.execute: push_to_talk
 
-# Mascots drawn by assets/make_mascots.py: 8 frames each, two per state (idle,
-# listen, think, speak).
-image:
-  - platform: animation
-    id: mascot_claude
-    file: assets/claude.gif
-    type: RGB565
-  - platform: animation
-    id: mascot_codex
-    file: assets/codex.gif
-    type: RGB565
-  - platform: animation
-    id: mascot_grokbot
-    file: assets/grokbot.gif
-    type: RGB565
-
 font:
   - file: gfonts://VT323
     id: font_bar
@@ -449,15 +460,34 @@ font:
     glyphsets:
       - GF_Latin_Core
 
-# The mascots move while listening, thinking and speaking, and blink when idle.
+# Plays the mascot animation for the agent and the voice state (an error shows the
+# idle one). Each animation has its own frame count and plays at the frame rate
+# assets/mascots.yaml sets for it.
 interval:
-  - interval: 400ms
+  - interval: 50ms
     then:
       - lambda: |-
-          id(tick)++;
-          int p = id(phase);
-          if ((p >= 1 && p <= 3) || (p == 0 && id(tick) % 10 <= 1))
-            id(box_display).update();
+          static animation::Animation *const CLIPS[3][4] = {
+              {id(claude_idle), id(claude_listen), id(claude_think), id(claude_speak)},
+              {id(codex_idle), id(codex_listen), id(codex_think), id(codex_speak)},
+              {id(grokbot_idle), id(grokbot_listen), id(grokbot_think), id(grokbot_speak)}};
+          static const float FPS[3][4] = {
+              {${fps_claude_idle}, ${fps_claude_listen}, ${fps_claude_think}, ${fps_claude_speak}},
+              {${fps_codex_idle}, ${fps_codex_listen}, ${fps_codex_think}, ${fps_codex_speak}},
+              {${fps_grokbot_idle}, ${fps_grokbot_listen}, ${fps_grokbot_think}, ${fps_grokbot_speak}}};
+          int a = id(agent), p = id(phase), s = (p >= 1 && p <= 3) ? p : 0;
+          auto *clip = CLIPS[a][s];
+          uint32_t now = millis();
+          if (clip != id(mascot_clip)) {
+            clip->set_frame(0);
+            id(mascot_clip) = clip;
+          } else if (clip->get_animation_frame_count() > 1 && now - id(frame_at) >= 1000.0f / FPS[a][s]) {
+            clip->next_frame();
+          } else {
+            return;
+          }
+          id(frame_at) = now;
+          id(box_display).update();
 
 display:
   - platform: mipi_spi
@@ -476,7 +506,8 @@ display:
       it.fill(bg);
 
       // The HIMMEL-7780 cap holds: Assist answers on the local pipeline only.
-      if (id(pipeline_state).has_state() && id(pipeline_state).state == "${cap_pipeline}") {
+      auto capped = [](text_sensor::TextSensor *s) { return s->has_state() && s->state == "${cap_pipeline}"; };
+      if (capped(id(assistant_1)) || capped(id(assistant_2))) {
         it.filled_rectangle(0, 0, 320, 22, amber);
         it.print(160, 11, id(font_bar), ink, TextAlign::CENTER, "Local only: daily AI cap");
       }
@@ -493,12 +524,9 @@ display:
       it.print(8, 36, id(font_bar), white, TextAlign::CENTER_LEFT, AGENTS[a]);
       it.print(312, 36, id(font_bar), white, TextAlign::CENTER_RIGHT, status);
 
-      // Two frames per state; idle shows the blink frame one tick in ten.
-      auto *mascot = a == 1 ? id(mascot_codex) : a == 2 ? id(mascot_grokbot) : id(mascot_claude);
-      int state = (p >= 1 && p <= 3) ? p : 0;
-      int frame = state == 0 ? (id(tick) % 10 == 0 ? 1 : 0) : id(tick) % 2;
-      mascot->set_frame(state * 2 + frame);
-      it.image(96, 50, mascot);
+      // The interval below picks the animation and its frame.
+      if (id(mascot_clip) != nullptr)
+        it.image(96, 50, id(mascot_clip));
 
       // The reply, or the error, word-wrapped to three lines.
       std::string rest = p == 4 ? id(error_text) : id(reply_text);

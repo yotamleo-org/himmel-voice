@@ -1,25 +1,32 @@
-# BOX-3 firmware: three wake words, a status screen and mascots
+# BOX-3 firmware: two wake words, a status screen and mascots
 
 `box3-jarvis.yaml` is the ESPHome config for the ESP32-S3-BOX-3 voice satellite
 (HIMMEL-7777, tracker HIMMEL-7719). The wake word runs on the device, so the
 cutoff is a firmware setting: the stock `hey_jarvis` cutoff (0.97) never fires on
 this hardware. The cutoff is the `wake_cutoff` substitution at the top of the file.
 
-The screen (HIMMEL-7815) shows the agent the wake word called and its pixel-art
-mascot, the voice state (Ready, Listening, Thinking, Speaking, Error, Muted,
-Offline), the reply text or the error, and an amber "Local only" banner while the
+The screen (HIMMEL-7815) shows the agent that answers and its pixel-art mascot,
+the voice state (Ready, Listening, Thinking, Speaking, Error, Muted, Offline),
+the reply text or the error, and an amber "Local only" banner while the
 HIMMEL-7780 daily cap holds.
 
-| Wake word   | Agent   | Home Assistant slot |
-| ----------- | ------- | ------------------- |
-| Hey Jarvis  | Claude  | 1                   |
-| Hey Mycroft | Codex   | 2                   |
-| Hey Grok    | Grokbot | 2 (internal model)  |
+Home Assistant gives a satellite two wake word slots, each with its own pipeline:
 
-Home Assistant gives a satellite two wake word slots, each with its own pipeline.
-"Hey Grok" is a device-only model that Home Assistant does not list: it shows
-Grokbot and runs the second slot's pipeline. The `hey_grok` model is from
-[TaterTotterson/Tater-Wake-Words](https://github.com/TaterTotterson/Tater-Wake-Words) (MIT).
+| Wake word  | Home Assistant slot |
+| ---------- | ------------------- |
+| Hey Jarvis | 1 (Wake word, Assistant)     |
+| Okay Nabu  | 2 (Wake word 2, Assistant 2) |
+
+The mascot follows the name of the pipeline the slot runs, so switching a slot to
+another pipeline in Home Assistant switches the mascot without a reflash:
+
+| Pipeline name contains   | Mascot  |
+| ------------------------ | ------- |
+| `codex`, `gpt`, `openai` | Codex   |
+| `grok`                   | Grokbot |
+| anything else            | Claude  |
+
+The match ignores case. Name each pipeline after its agent.
 
 - **BOOT** (the left top button) or a tap on the screen talks to the first slot
   without a wake word; pressed while the assistant runs, it stops it, reply
@@ -62,20 +69,29 @@ esphome -s wake_cutoff 0.50 run box3-jarvis.yaml --device box3-jarvis.local   # 
 Then add the device in Home Assistant (Settings, Devices, ESPHome) and set, on the
 device page:
 
-- Wake word: Hey Jarvis; Assistant: the Claude pipeline.
-- Wake word 2: Hey Mycroft; Assistant 2: the Codex pipeline.
+- Wake word: Hey Jarvis; Assistant: the first slot's pipeline.
+- Wake word 2: Okay Nabu; Assistant 2: the second slot's pipeline.
 
-The "Local only" banner reads the first Assistant select, named by the
-`pipeline_select` substitution (`select.jarvis_box_3_assistant` by default). Check
-the entity ID on the device page and pass `-s pipeline_select <entity id>` if it
-differs.
+The mascot and the "Local only" banner read the two Assistant selects, named by
+the `pipeline_select` and `pipeline_select_2` substitutions
+(`select.jarvis_box_3_assistant` and `select.jarvis_box_3_assistant_2` by
+default). Check the entity IDs on the device page and pass
+`-s pipeline_select <entity id>` or `-s pipeline_select_2 <entity id>` if they
+differ.
 
 ## Mascots
 
-`assets/make_mascots.py` draws the three mascots on a 32x32 grid in one palette
-whose colours are exact in RGB565, and writes `assets/<mascot>.gif` (8 frames:
-idle, listen, think, speak, two each), `assets/palette.gpl` and the preview sheet
-`assets/mascots.png`. After a change, regenerate them (needs Pillow):
+`assets/mascots.yaml` is the ESPHome package that loads one animation per mascot
+and state (idle, listen, think, speak) and sets the frame rate of each, as
+`fps_<mascot>_<state>`. The firmware takes the frame count from each file, so an
+animation can have any number of frames. Consecutive frames must differ: GIF
+writers merge equal ones, and the firmware ignores frame durations.
+
+The animations now in `assets/` are placeholders. `assets/make_mascots.py` draws
+them on a 32x32 grid in one palette whose colours are exact in RGB565, and writes
+`assets/<mascot>-<state>.gif`, `assets/mascots.yaml`, `assets/palette.gpl` and
+the preview sheet `assets/mascots.png`. After a change, regenerate them (needs
+Pillow):
 
 ```bash
 python3 -I assets/make_mascots.py
