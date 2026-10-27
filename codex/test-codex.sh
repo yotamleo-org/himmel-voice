@@ -22,6 +22,8 @@ for name, s in svc.items():
     assert "no-new-privileges:true" in s.get("security_opt", []), (name, "no-new-privileges")
     assert s.get("tmpfs"), (name, "no tmpfs")
     assert "privileged" not in s and "cap_add" not in s and "network_mode" not in s, name
+    # the fence is IPv4 only, so no IPv6 (not even link-local) inside the containers
+    assert s.get("sysctls", {}).get("net.ipv6.conf.all.disable_ipv6") == 1, (name, "IPv6 on")
 for name in svc:
     rw = [v for v in svc[name].get("volumes", []) if not v.endswith(":ro")]
     assert rw == (["./data/auth:/auth"] if name == "litellm" else []), (name, rw)
@@ -31,6 +33,8 @@ assert svc["litellm"]["networks"] == ["edge", "internal"], svc["litellm"]["netwo
 assert sorted(svc["squid"]["networks"]) == ["egress", "internal"], svc["squid"]["networks"]
 nets = yaml.safe_load(open(sys.argv[1]))["networks"]
 assert nets["internal"].get("internal") is True, "internal network is not internal"
+bridges = {n: v.get("driver_opts", {}).get("com.docker.network.bridge.name") for n, v in nets.items()}
+assert bridges == {"edge": "br-codex-edge", "internal": "br-codex-int", "egress": "br-codex-out"}, bridges
 EOF
 ); then ok "compose: non-root, read-only, no caps, no-new-privileges; only the auth dir is writable"
 else bad "compose hardening: $out"; fi
@@ -80,16 +84,22 @@ want='-A CODEX-USER -s 192.0.2.5/32 -o br-codex-edge -p tcp -m conntrack --ctori
 -A CODEX-USER -i br-codex-out -p tcp -m conntrack --ctorigdstport 443 --ctdir ORIGINAL -j RETURN
 -A CODEX-USER -i br-codex-out -p udp -m conntrack --ctorigdstport 53 --ctdir ORIGINAL -j RETURN
 -A CODEX-USER -i br-codex-out -p tcp -m conntrack --ctorigdstport 53 --ctdir ORIGINAL -j RETURN
--A CODEX-USER -i br-codex-out -m conntrack --ctdir ORIGINAL -j DROP'
-got=$(ns 'HA_HOST=192.0.2.5 bash "$1" && iptables -w -S CODEX-USER | grep -v "^-N"; iptables -w -S DOCKER-USER | grep -c -- "-j CODEX-USER"' 2>&1)
-if [ "$got" = "$want"$'\n1' ]; then ok "only HA_HOST reaches the port; the containers start only 443 and DNS via squid"
+-A CODEX-USER -i br-codex-out -m conntrack --ctdir ORIGINAL -j DROP
+-A CODEX-INPUT -i br-codex-out -p udp -m conntrack --ctorigdstport 53 --ctdir ORIGINAL -j RETURN
+-A CODEX-INPUT -i br-codex-out -p tcp -m conntrack --ctorigdstport 53 --ctdir ORIGINAL -j RETURN
+-A CODEX-INPUT -i br-codex-edge -m conntrack --ctdir ORIGINAL -j DROP
+-A CODEX-INPUT -i br-codex-int -m conntrack --ctdir ORIGINAL -j DROP
+-A CODEX-INPUT -i br-codex-out -m conntrack --ctdir ORIGINAL -j DROP'
+got=$(ns 'HA_HOST=192.0.2.5 bash "$1" && iptables -w -S CODEX-USER | grep -v "^-N"; iptables -w -S CODEX-INPUT | grep -v "^-N";
+    iptables -w -S DOCKER-USER | grep -c -- "-j CODEX-USER"; iptables -w -S INPUT | grep -c -- "-j CODEX-INPUT"' 2>&1)
+if [ "$got" = "$want"$'\n1\n1' ]; then ok "only HA_HOST reaches the port; the containers start only 443 and DNS via squid, and nothing on the station but DNS"
 else bad "rule set:"$'\n'"$got"; fi
 
 # Row 6: a new HA_HOST replaces the old one's rule; a second run adds no duplicate.
 got=$(ns 'HA_HOST=192.0.2.5 bash "$1" && HA_HOST=192.0.2.6 bash "$1" && HA_HOST=192.0.2.6 bash "$1" &&
     iptables -w -S CODEX-USER | grep -c "192.0.2.5"; iptables -w -S CODEX-USER | grep -c "192.0.2.6";
-    iptables -w -S | grep -c -- "-j CODEX-USER"' 2>&1)
-if [ "$got" = $'0\n1\n1' ]; then ok "a new HA_HOST replaces the old rule; re-runs are idempotent"
+    iptables -w -S | grep -c -- "-j CODEX-USER"; iptables -w -S | grep -c -- "-j CODEX-INPUT"; iptables -w -S CODEX-INPUT | grep -c .' 2>&1)
+if [ "$got" = $'0\n1\n1\n1\n6' ]; then ok "a new HA_HOST replaces the old rule; re-runs are idempotent"
 else bad "HA_HOST change / idempotence: $got"; fi
 
 # Row 7: a malformed or missing HA_HOST is refused before any rule is written.

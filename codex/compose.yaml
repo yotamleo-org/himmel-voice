@@ -10,6 +10,8 @@ services:
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     tmpfs: [/tmp, /app/.cache]
+    sysctls:
+      net.ipv6.conf.all.disable_ipv6: 1
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     environment:
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set in .env}
@@ -36,19 +38,25 @@ services:
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     tmpfs: [/tmp, "/run:uid=584792,gid=584792"]
+    sysctls:
+      net.ipv6.conf.all.disable_ipv6: 1
     entrypoint: ["/usr/sbin/squid-gnutls", "-N", "-f", "/etc/squid/codex.conf"]
     volumes:
       - ./squid.conf:/etc/squid/codex.conf:ro
     networks: [internal, egress]
 
-# docker-user-rule.sh keys on the two bridge names: the edge bridge takes only HA_HOST's
-# connections to 4000 and starts none; the egress bridge starts only tcp 443 and DNS.
+# docker-user-rule.sh keys on the bridge names: the edge bridge takes only HA_HOST's
+# connections to 4000 and starts none; the egress bridge starts only tcp 443 and DNS; none of
+# the three reaches the station itself, but for squid's DNS. The rule is IPv4 only, hence the
+# disable_ipv6 sysctls above.
 networks:
   edge:
     driver_opts:
       com.docker.network.bridge.name: br-codex-edge
   internal:
     internal: true
+    driver_opts:
+      com.docker.network.bridge.name: br-codex-int
   egress:
     driver_opts:
       com.docker.network.bridge.name: br-codex-out

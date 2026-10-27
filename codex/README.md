@@ -6,7 +6,7 @@
 - `squid` is LiteLLM's only way out: CONNECT on 443 to `auth.openai.com` and `chatgpt.com`, nothing else (`squid.conf`). LiteLLM reaches it over an internal network through `HTTPS_PROXY`.
 - Both run non-root with a read-only rootfs, all capabilities dropped and no-new-privileges. The auth directory is the only writable mount. The admin UI is off, the cost map is the bundled one, and there is no database, so the master key is the only key.
 
-`docker-user-rule.sh` puts a `CODEX-USER` chain in `DOCKER-USER`. On the edge bridge (`br-codex-edge`, the published port 4000) only the Home Assistant host may open a connection, and only to 4000, and LiteLLM may open none. The squid bridge (`br-codex-out`) may open only tcp 443 and DNS. A connection from the station itself does not cross `FORWARD`, so the smoke test below runs on the station. The rule uses the same untracked `HA_HOST` file as the Wyoming rule. `codex-docker-user.service` applies it before `docker.service`, and `codex-docker-user.timer` re-applies it every minute in case a firewall flush wipes it. Networks are IPv4 only; do not enable IPv6 on them, because the rule is iptables only.
+`docker-user-rule.sh` puts a `CODEX-USER` chain in `DOCKER-USER`. On the edge bridge (`br-codex-edge`, the published port 4000) only the Home Assistant host may open a connection, and only to 4000, and LiteLLM may open none. The squid bridge (`br-codex-out`) may open only tcp 443 and DNS. A connection to the station itself crosses `INPUT`, not `FORWARD`, so a `CODEX-INPUT` chain drops every connection the three codex bridges (edge, `br-codex-int`, out) open to the station, except squid's DNS. The station's own connections are not filtered, so the smoke test below runs on the station. The rule uses the same untracked `HA_HOST` file as the Wyoming rule. `codex-docker-user.service` applies it before `docker.service`, and `codex-docker-user.timer` re-applies it every minute in case a firewall flush wipes it. The rule covers IPv4 only, so both containers disable IPv6 through a sysctl. Do not enable IPv6 on these networks.
 
 `bash test-codex.sh` checks the compose hardening, the pin site, the squid allowlist and the rule set. Its firewall rows run in a private network namespace.
 
@@ -25,6 +25,7 @@ On the station, in `codex/`:
     sudo systemctl daemon-reload
     sudo systemctl enable --now codex-docker-user.service codex-docker-user.timer
     sudo iptables -S CODEX-USER    # the HA_HOST RETURN first, then the DROPs
+    sudo iptables -S CODEX-INPUT   # two DNS RETURNs, then a DROP per bridge
     sudo docker compose --env-file images.lock --env-file .env run --rm squid -k parse
     sudo docker compose --env-file images.lock --env-file .env up -d
 

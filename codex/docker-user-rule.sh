@@ -44,6 +44,19 @@ allow=(-s "$ha_host/32" -o "$edge" -p tcp -m conntrack --ctorigdstport 4000 --ct
 iptables -w -C "$chain" "${allow[@]}" 2>/dev/null || iptables -w -I "$chain" 1 "${allow[@]}"
 iptables -w -C DOCKER-USER -j "$chain" 2>/dev/null || iptables -w -I DOCKER-USER 1 -j "$chain"
 
+# A connection to the station itself (a bridge gateway or the LAN address) crosses INPUT, not
+# FORWARD, so the containers get their own INPUT chain: squid may ask the station's resolver,
+# nothing else on the station is reachable from any of the three codex bridges.
+input=CODEX-INPUT
+iptables -w -n -L "$input" >/dev/null 2>&1 || iptables -w -N "$input"
+addin() { iptables -w -C "$input" "$@" 2>/dev/null || iptables -w -A "$input" "$@"; }
+addin -i "$out" -p udp -m conntrack --ctorigdstport 53 --ctdir ORIGINAL -j RETURN
+addin -i "$out" -p tcp -m conntrack --ctorigdstport 53 --ctdir ORIGINAL -j RETURN
+for bridge in "$edge" br-codex-int "$out"; do
+    addin -i "$bridge" -m conntrack --ctdir ORIGINAL -j DROP
+done
+iptables -w -C INPUT -j "$input" 2>/dev/null || iptables -w -I INPUT 1 -j "$input"
+
 # Remove an earlier HA_HOST's rule.
 while IFS= read -r line; do
     [ -n "$line" ] || continue
