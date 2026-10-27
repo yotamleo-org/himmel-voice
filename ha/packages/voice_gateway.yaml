@@ -119,6 +119,17 @@ script:
           text: >-
             Research this and answer in a few short paragraphs, naming your sources: {{ topic }}
         response_variable: answer
+        continue_on_error: true
+      - if:
+          - condition: template
+            value_template: "{{ answer is not defined or answer.response.response_type == 'error' }}"
+        then:
+          - action: assist_satellite.announce
+            target:
+              entity_id: "{{ satellite }}"
+            data:
+              message: "Research on {{ topic }} failed."
+          - stop: Research failed
       - action: script.save_note
         data:
           title: "{{ topic }}"

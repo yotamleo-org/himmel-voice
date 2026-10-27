@@ -9,6 +9,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -36,6 +37,7 @@ class Base(unittest.TestCase):
         if self.peers is not None:
             cfg["peers"] = self.peers
         self.server = gateway.make_server(cfg)
+        self.addCleanup(os.close, cfg["vault_fd"])
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
     def tearDown(self):
@@ -121,6 +123,22 @@ class NoteTests(Base):
         os.symlink(self.outside, os.path.join(self.vault, "00-Inbox"))
         self.assertEqual(self.call("POST", "/note", NOTE)[0], 403)
         self.assertEqual(self.files(os.path.join(self.outside, "voice")), [])
+
+    def test_vault_swapped_for_symlink_after_start_not_followed(self):
+        self.start()
+        os.makedirs(os.path.join(self.outside, "00-Inbox", "voice"))
+        moved = os.path.join(self.tmp.name, "moved")
+        os.rename(self.vault, moved)
+        os.symlink(self.outside, self.vault)
+        self.assertEqual(self.call("POST", "/note", NOTE)[0], 201)
+        self.assertEqual(self.files(os.path.join(self.outside, "00-Inbox", "voice")), [])
+        self.assertEqual(len(self.files(os.path.join(moved, "00-Inbox", "voice"))), 1)
+
+    def test_failed_write_is_500_and_leaves_no_file(self):
+        self.start()
+        with mock.patch.object(gateway.os, "fdopen", side_effect=OSError("disk full")):
+            self.assertEqual(self.call("POST", "/note", NOTE)[0], 500)
+        self.assertEqual(self.files(self.inbox), [])
 
     def test_symlink_at_target_name_is_not_followed(self):
         victim = os.path.join(self.outside, "victim.md")

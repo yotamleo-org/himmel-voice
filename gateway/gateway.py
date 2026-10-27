@@ -75,7 +75,9 @@ def load_config(env):
             die(f"search dir {rel!r} is not a directory inside the vault")
         search_dirs.append(os.path.relpath(real, vault))
     peers = {str(bind)} | ({str(ha_host)} if ha_host else set())
-    return {"token": token, "vault": vault, "bind": str(bind), "port": port,
+    # Held for the process lifetime: a vault or ancestor swapped for a link later changes nothing.
+    vault_fd = os.open(vault, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    return {"token": token, "vault": vault, "vault_fd": vault_fd, "bind": str(bind), "port": port,
             "peers": peers, "search_dirs": search_dirs}
 
 
@@ -88,11 +90,11 @@ def slugify(title):
     return re.sub(r"[^a-z0-9]+", "-", s).strip("-")[:60].rstrip("-") or "note"
 
 
-def open_dir(vault, rel):
-    """Open vault/rel by directory fd, refusing a symlink at every component; None if any is one.
+def open_dir(vault_fd, rel):
+    """Open rel below the vault fd, refusing a symlink at every component; None if any is one.
 
     A component swapped for a link after a startup check cannot redirect what happens below it."""
-    dfd = os.open(vault, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    dfd = os.dup(vault_fd)
     for part in rel.split(os.sep):
         if part in ("", "."):
             continue
@@ -107,14 +109,14 @@ def open_dir(vault, rel):
     return dfd
 
 
-def write_note(vault, title, body, brain):
+def write_note(vault_fd, title, body, brain):
     """Create one inbox file; return its vault-relative path, or None if the inbox is not confined."""
     created = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
     text = (f"---\ntitle: {json.dumps(title, ensure_ascii=False)}\nbrain: {brain}\n"
             f"created: {created}\nsource: voice-gateway\ntags: [voice]\n---\n\n{body.rstrip()}\n")
     data = text.encode("utf-8")  # raises before any file exists, e.g. on a lone surrogate
     stem = f"{today()}-{brain}-{slugify(title)}"
-    dfd = open_dir(vault, INBOX)
+    dfd = open_dir(vault_fd, INBOX)
     if dfd is None:
         return None
     try:
@@ -125,8 +127,12 @@ def write_note(vault, title, body, brain):
                              0o644, dir_fd=dfd)
             except FileExistsError:
                 continue
-            with os.fdopen(fd, "wb") as f:
-                f.write(data)
+            try:
+                with os.fdopen(fd, "wb") as f:
+                    f.write(data)
+            except OSError:
+                os.unlink(name, dir_fd=dfd)  # never leave an empty or truncated note behind
+                raise
             return f"00-Inbox/voice/{name}"
     finally:
         os.close(dfd)
@@ -185,8 +191,10 @@ def scan(rootfd, rel, terms, seen):
 def search(cfg, q):
     terms = list(dict.fromkeys(t for t in re.findall(r"\w+", q.lower()) if len(t) >= 3))[:8]
     best, seen = [], set()
+    if not terms:
+        return []
     for rel in cfg["search_dirs"]:
-        rootfd = open_dir(cfg["vault"], rel)
+        rootfd = open_dir(cfg["vault_fd"], rel)
         if rootfd is None:
             continue
         try:
@@ -270,9 +278,12 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply(400, {"error": "title (no path), body and brain ([a-z0-9-]) are required"})
                 return
             try:
-                path = write_note(self.cfg["vault"], title.strip(), body, brain)
+                path = write_note(self.cfg["vault_fd"], title.strip(), body, brain)
             except UnicodeEncodeError:
                 self.reply(400, {"error": "title and body must be valid text"})
+                return
+            except OSError:
+                self.reply(500, {"error": "the note could not be written"})
                 return
             if path is None:
                 self.reply(403, {"error": "the inbox is not a plain directory inside the vault"})
