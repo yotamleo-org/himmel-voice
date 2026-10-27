@@ -203,7 +203,7 @@ def aliases(ws, path, dry_run):
                 entity, colon, names = line.partition(":")
                 if not colon:
                     raise ValueError(f"aliases file: no colon in line {line!r}")
-                entity = entity.strip()
+                entity = entity.strip().lower()  # HA entity ids are lowercase
                 if entity in wanted:
                     raise ValueError(f"aliases file: duplicate entity {entity!r}")
                 wanted[entity] = list(dict.fromkeys(n.strip() for n in names.split(",") if n.strip()))
@@ -230,7 +230,10 @@ def aliases(ws, path, dry_run):
         print(f"  {'would set' if dry_run else 'set'} {e}: {named(current[e])} -> {todo[e]}")
     if not dry_run:
         for e, n in sorted(todo.items()):
-            ws.call("config/entity_registry/update", entity_id=e, aliases=n + ([None] if None in current[e] else []))
+            # keep the own-name marker where it was (first): alias order sets the primary name
+            marker = [None] if None in current[e] else []
+            ws.call("config/entity_registry/update", entity_id=e,
+                    aliases=marker + n if current[e][:1] == [None] else n + marker)
         current = registry()
         todo = differing(current)
     print(f"missing: {len(todo)}")
