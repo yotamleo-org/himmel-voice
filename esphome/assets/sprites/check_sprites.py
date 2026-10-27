@@ -80,6 +80,12 @@ def read_png(path):
             raise ValueError("transparency chunk present; strips are opaque")
         elif kind == b"IDAT":
             idat += body
+        elif kind == b"IEND":
+            break
+    else:
+        raise ValueError("no IEND chunk; the file is truncated")
+    if not width or not height:
+        raise ValueError(f"empty image {width}x{height}")
     if depth != 8 or interlace or ctype not in (2, 3, 6):
         raise ValueError(f"unsupported PNG (depth {depth}, colour type {ctype}, interlace {interlace})")
     bpp = {2: 3, 3: 1, 6: 4}[ctype]
