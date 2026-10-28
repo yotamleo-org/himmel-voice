@@ -162,8 +162,10 @@ script:
   ask_chief:
     alias: Ask the chief
     description: >-
-      Pass a spoken message to the himmel chief, for example to ask what is blocked or to ask
-      it to pause. Only the office satellite may use it: pass your own satellite id. The chief
+      Pass a spoken message to the himmel chief. Use it ONLY when the user explicitly addresses
+      the chief, for example "tell the chief…" or "ask the chief what is blocked". Never use it
+      for general questions, device control or anything you can answer yourself; answer those
+      directly. Only the office satellite may use it: pass your own satellite id. The chief
       treats the line as an unverified voice request: status and read-only asks are answered,
       anything that widens work (a dispatch, a merge, a push) only produces a confirm on the
       operator's phone. ok is false when the message was not delivered, for example when no
