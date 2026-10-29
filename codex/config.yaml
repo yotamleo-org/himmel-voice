@@ -1,0 +1,17 @@
+# LiteLLM proxy config for Okay Nabu (HIMMEL-7733). One deployment on the ChatGPT login.
+# gpt-6.1-sol, not a *-codex model: Home Assistant's litellm integration calls
+# /v1/chat/completions, and the *-codex models serve /v1/responses only.
+model_list:
+  - model_name: chatgpt/gpt-6.1-sol
+    model_info:
+      mode: responses
+    litellm_params:
+      model: chatgpt/gpt-6.1-sol
+      rpm: 20
+
+# usage-based-routing-v2 refuses a request once the deployment's rpm is reached.
+router_settings:
+  routing_strategy: usage-based-routing-v2
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY

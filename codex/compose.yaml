@@ -1,0 +1,62 @@
+# Okay Nabu answers with Codex (HIMMEL-7733): a LiteLLM proxy that holds the ChatGPT login,
+# reachable only from the Home Assistant host, with no way out but squid to the OpenAI hosts.
+# Images are pinned by digest in images.lock, the one pin site; a bump is its own PR.
+services:
+  litellm:
+    image: ${LITELLM_IMAGE:?set by images.lock}
+    restart: unless-stopped
+    user: "65534:65534"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: [/tmp, /app/.cache]
+    sysctls:
+      net.ipv6.conf.all.disable_ipv6: 1
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set in .env}
+      CHATGPT_TOKEN_DIR: /auth
+      HTTPS_PROXY: http://squid:3128
+      HTTP_PROXY: http://squid:3128
+      NO_PROXY: localhost,127.0.0.1
+      DISABLE_ADMIN_UI: "True"
+      LITELLM_LOCAL_MODEL_COST_MAP: "True"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./data/auth:/auth
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:4000:4000"
+    networks: [edge, internal]
+    depends_on: [squid]
+
+  # The only egress: CONNECT to auth.openai.com and chatgpt.com on 443 (squid.conf).
+  squid:
+    image: ${SQUID_IMAGE:?set by images.lock}
+    restart: unless-stopped
+    user: "584792:584792"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: [/tmp, "/run:uid=584792,gid=584792"]
+    sysctls:
+      net.ipv6.conf.all.disable_ipv6: 1
+    entrypoint: ["/usr/sbin/squid-gnutls", "-N", "-f", "/etc/squid/codex.conf"]
+    volumes:
+      - ./squid.conf:/etc/squid/codex.conf:ro
+    networks: [internal, egress]
+
+# docker-user-rule.sh keys on the bridge names: the edge bridge takes only HA_HOST's
+# connections to 4000 and starts none; the egress bridge starts only tcp 443 and DNS; none of
+# the three reaches the station itself, but for squid's DNS. The rule is IPv4 only, hence the
+# disable_ipv6 sysctls above.
+networks:
+  edge:
+    driver_opts:
+      com.docker.network.bridge.name: br-codex-edge
+  internal:
+    internal: true
+    driver_opts:
+      com.docker.network.bridge.name: br-codex-int
+  egress:
+    driver_opts:
+      com.docker.network.bridge.name: br-codex-out
