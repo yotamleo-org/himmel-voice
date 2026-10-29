@@ -1,0 +1,83 @@
+# The BOX-3 mascot animations (HIMMEL-7815), generated with the art: one per mascot
+# and state. The firmware takes the frame count from each file and plays it at the
+# fps set here. The clips are 96x96; mascot_x and mascot_y centre them in the
+# 128x128 box the screen keeps for the mascot at 96, 50.
+substitutions:
+  mascot_x: "112"
+  mascot_y: "66"
+  fps_claude_idle: "5"
+  fps_claude_listen: "8"
+  fps_claude_think: "6"
+  fps_claude_speak: "8"
+  fps_claude_error: "6"
+  fps_codex_idle: "5"
+  fps_codex_listen: "8"
+  fps_codex_think: "6"
+  fps_codex_speak: "8"
+  fps_codex_error: "6"
+  fps_grokbot_idle: "5"
+  fps_grokbot_listen: "8"
+  fps_grokbot_think: "6"
+  fps_grokbot_speak: "8"
+  fps_grokbot_error: "6"
+image:
+  - platform: animation
+    id: claude_idle
+    file: assets/sprites/claude_idle.gif
+    type: RGB565
+  - platform: animation
+    id: claude_listen
+    file: assets/sprites/claude_listen.gif
+    type: RGB565
+  - platform: animation
+    id: claude_think
+    file: assets/sprites/claude_think.gif
+    type: RGB565
+  - platform: animation
+    id: claude_speak
+    file: assets/sprites/claude_speak.gif
+    type: RGB565
+  - platform: animation
+    id: claude_error
+    file: assets/sprites/claude_error.gif
+    type: RGB565
+  - platform: animation
+    id: codex_idle
+    file: assets/sprites/codex_idle.gif
+    type: RGB565
+  - platform: animation
+    id: codex_listen
+    file: assets/sprites/codex_listen.gif
+    type: RGB565
+  - platform: animation
+    id: codex_think
+    file: assets/sprites/codex_think.gif
+    type: RGB565
+  - platform: animation
+    id: codex_speak
+    file: assets/sprites/codex_speak.gif
+    type: RGB565
+  - platform: animation
+    id: codex_error
+    file: assets/sprites/codex_error.gif
+    type: RGB565
+  - platform: animation
+    id: grokbot_idle
+    file: assets/sprites/grokbot_idle.gif
+    type: RGB565
+  - platform: animation
+    id: grokbot_listen
+    file: assets/sprites/grokbot_listen.gif
+    type: RGB565
+  - platform: animation
+    id: grokbot_think
+    file: assets/sprites/grokbot_think.gif
+    type: RGB565
+  - platform: animation
+    id: grokbot_speak
+    file: assets/sprites/grokbot_speak.gif
+    type: RGB565
+  - platform: animation
+    id: grokbot_error
+    file: assets/sprites/grokbot_error.gif
+    type: RGB565
